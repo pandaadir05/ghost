@@ -80,6 +80,11 @@ mod platform {
     pub fn enumerate_memory_regions(pid: u32) -> Result<Vec<MemoryRegion>> {
         let mut regions = Vec::new();
 
+        // Skip system process 
+        if pid == 0 || pid == 4 {
+            return Ok(regions);
+        }
+
         unsafe {
             let handle = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, false, pid)
                 .context("Failed to open process")?;
