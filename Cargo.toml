@@ -1,0 +1,17 @@
+[workspace]
+members = [
+    "ghost-core",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["Ghost Team"]
+license = "MIT"
+
+[workspace.dependencies]
+anyhow = "1.0"
+thiserror = "1.0"
+log = "0.4"
+env_logger = "0.11"
