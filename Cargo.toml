@@ -1,5 +1,5 @@
 [workspace]
-members = [
+members = [ "ghost-cli",
     "ghost-core",
 ]
 resolver = "2"
