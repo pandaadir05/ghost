@@ -3,8 +3,10 @@ use std::fmt;
 #[derive(Debug, Clone)]
 pub struct ProcessInfo {
     pub pid: u32,
+    pub ppid: u32,
     pub name: String,
     pub path: Option<String>,
+    pub thread_count: u32,
 }
 
 impl fmt::Display for ProcessInfo {
@@ -47,8 +49,10 @@ mod platform {
 
                     processes.push(ProcessInfo {
                         pid: entry.th32ProcessID,
+                        ppid: entry.th32ParentProcessID,
                         name,
                         path: None,
+                        thread_count: entry.cntThreads,
                     });
 
                     if Process32NextW(snapshot, &mut entry).is_err() {
