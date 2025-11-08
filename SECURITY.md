@@ -65,6 +65,7 @@ We follow responsible disclosure practices:
 ### Vulnerability Categories We're Interested In
 
 **High Priority:**
+
 - Memory safety violations
 - Privilege escalation
 - Code injection vulnerabilities
@@ -72,11 +73,13 @@ We follow responsible disclosure practices:
 - Sensitive data exposure
 
 **Medium Priority:**
+
 - Denial of service
 - Information disclosure
 - Logic flaws in detection algorithms
 
 **Out of Scope:**
+
 - Issues requiring physical access
 - Social engineering attacks
 - Third-party dependency vulnerabilities (unless exploitable through Ghost)
