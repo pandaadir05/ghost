@@ -1,4 +1,5 @@
 pub mod anomaly;
+pub mod config;
 pub mod detection;
 pub mod ebpf;
 pub mod testing;
@@ -14,6 +15,7 @@ pub mod thread;
 pub mod threat_intel;
 
 pub use anomaly::{AnomalyDetector, AnomalyScore, ProcessFeatures};
+pub use config::{DetectionConfig, ProcessFilter};
 pub use detection::{DetectionEngine, DetectionResult, ThreatLevel};
 #[cfg(target_os = "linux")]
 pub use ebpf::{EbpfDetector, EbpfEvent, EbpfError, EbpfStatistics};
