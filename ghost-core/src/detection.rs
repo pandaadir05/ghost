@@ -71,14 +71,23 @@ impl DetectionEngine {
             confidence += 0.4;
         }
 
-        // Update baseline
+        // Check for thread count anomalies
         if let Some(baseline) = self.baseline.get(&process.pid) {
             if process.thread_count > baseline.thread_count {
                 let diff = process.thread_count - baseline.thread_count;
                 indicators.push(format!("{} new threads created", diff));
                 confidence += 0.2;
             }
+            
+            // Detect significant RWX increase (possible injection)
+            if rwx_count > baseline.rwx_regions + 1 {
+                indicators.push("Rapid RWX region allocation".to_string());
+                confidence += 0.5;
+            }
         }
+        
+        // Check for unusual memory patterns
+        self.check_memory_patterns(memory_regions, &mut indicators, &mut confidence);
 
         self.baseline.insert(
             process.pid,
@@ -101,6 +110,43 @@ impl DetectionEngine {
             threat_level,
             indicators,
             confidence,
+        }
+    }
+
+    /// Check for suspicious memory patterns
+    fn check_memory_patterns(
+        &self,
+        regions: &[MemoryRegion],
+        indicators: &mut Vec<String>,
+        confidence: &mut f32,
+    ) {
+        // Look for small executable allocations (typical shellcode size)
+        let small_exec = regions
+            .iter()
+            .filter(|r| {
+                r.size < 0x10000 // 64KB
+                    && (r.protection == MemoryProtection::ReadExecute
+                        || r.protection == MemoryProtection::ReadWriteExecute)
+            })
+            .count();
+
+        if small_exec >= 3 {
+            indicators.push("Multiple small executable allocations".to_string());
+            *confidence += 0.3;
+        }
+
+        // Check for memory gaps that might indicate hollowing
+        let mut sorted_regions: Vec<_> = regions.iter().collect();
+        sorted_regions.sort_by_key(|r| r.base_address);
+        
+        for window in sorted_regions.windows(2) {
+            let gap = window[1].base_address - (window[0].base_address + window[0].size);
+            if gap > 0x100000 && gap < 0x1000000 {
+                // 1MB to 16MB gap is suspicious
+                indicators.push("Suspicious memory gaps detected".to_string());
+                *confidence += 0.2;
+                break;
+            }
         }
     }
 }
