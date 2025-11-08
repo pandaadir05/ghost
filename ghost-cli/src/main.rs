@@ -14,6 +14,11 @@ fn main() -> Result<()> {
     let mut detections = Vec::new();
 
     for proc in &processes {
+        // Skip known safe system processes for performance
+        if proc.name == "csrss.exe" || proc.name == "wininit.exe" || proc.name == "winlogon.exe" {
+            continue;
+        }
+        
         if let Ok(regions) = memory::enumerate_memory_regions(proc.pid) {
             // Get thread information if available
             let threads = thread::enumerate_threads(proc.pid).ok();
