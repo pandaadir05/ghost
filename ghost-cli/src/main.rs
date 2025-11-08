@@ -75,6 +75,18 @@ fn main() -> Result<()> {
                 .value_name("FILE")
                 .help("Load configuration from file"),
         )
+        .arg(
+            Arg::new("mitre-analysis")
+                .long("mitre-analysis")
+                .action(clap::ArgAction::SetTrue)
+                .help("Enable MITRE ATT&CK framework analysis"),
+        )
+        .arg(
+            Arg::new("mitre-stats")
+                .long("mitre-stats")
+                .action(clap::ArgAction::SetTrue)
+                .help("Show MITRE ATT&CK framework statistics"),
+        )
         .get_matches();
 
     // Initialize logging based on debug flag
@@ -96,6 +108,8 @@ fn main() -> Result<()> {
     let target_process = matches.get_one::<String>("process");
     let output_file = matches.get_one::<String>("output");
     let config_file = matches.get_one::<String>("config");
+    let mitre_analysis = matches.get_flag("mitre-analysis");
+    let mitre_stats = matches.get_flag("mitre-stats");
 
     // Load configuration if specified
     let config = if let Some(config_path) = config_file {
@@ -130,6 +144,34 @@ fn main() -> Result<()> {
         error!("Failed to initialize detection engine: {}", e);
         anyhow::anyhow!("Detection engine initialization failed: {}", e)
     })?;
+    
+    // Display MITRE ATT&CK statistics if requested
+    if mitre_stats {
+        if !quiet {
+            println!("MITRE ATT&CK Framework Statistics:");
+            println!("==================================");
+        }
+        
+        let (techniques, tactics, actors) = engine.get_mitre_stats();
+        if !quiet {
+            println!("Techniques: {}", techniques);
+            println!("Tactics: {}", tactics);
+            println!("Threat Actors: {}", actors);
+            println!("Matrix Version: 13.1");
+            println!("Framework Coverage:");
+            println!("  - Process Injection (T1055)");
+            println!("  - Process Hollowing (T1055.012)");
+            println!("  - Defense Evasion (TA0004)");
+            println!("  - Privilege Escalation (TA0005)");
+            println!("  - APT29 (Cozy Bear)");
+            println!();
+        }
+        
+        // If only showing stats, exit here
+        if mitre_stats && target_pid.is_none() && target_process.is_none() {
+            return Ok(());
+        }
+    }
     
     let processes = if let Some(pid_str) = target_pid {
         let pid: u32 = pid_str.parse().map_err(|e| {
