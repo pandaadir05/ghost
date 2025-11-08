@@ -24,6 +24,8 @@ mod platform {
         CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
         TH32CS_SNAPPROCESS,
     };
+    use windows::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
+    use windows::Win32::System::ProcessStatus::GetProcessImageFileNameW;
 
     pub fn enumerate_processes() -> Result<Vec<ProcessInfo>> {
         let mut processes = Vec::new();
@@ -47,11 +49,14 @@ mod platform {
                             .unwrap_or(entry.szExeFile.len())],
                     );
 
+                    // Try to get full process path
+                    let path = get_process_path(entry.th32ProcessID);
+
                     processes.push(ProcessInfo {
                         pid: entry.th32ProcessID,
                         ppid: entry.th32ParentProcessID,
                         name,
-                        path: None,
+                        path,
                         thread_count: entry.cntThreads,
                     });
 
@@ -65,6 +70,24 @@ mod platform {
         }
 
         Ok(processes)
+    }
+
+    fn get_process_path(pid: u32) -> Option<String> {
+        unsafe {
+            let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid).ok()?;
+            let mut buffer = [0u16; 1024];
+            
+            if GetProcessImageFileNameW(handle, &mut buffer) > 0 {
+                let _ = CloseHandle(handle);
+                let path = String::from_utf16_lossy(
+                    &buffer[..buffer.iter().position(|&c| c == 0).unwrap_or(buffer.len())],
+                );
+                Some(path)
+            } else {
+                let _ = CloseHandle(handle);
+                None
+            }
+        }
     }
 }
 
