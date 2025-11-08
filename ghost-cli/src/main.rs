@@ -1,6 +1,7 @@
 use anyhow::Result;
 use clap::{Arg, Command};
 use ghost_core::{memory, process, thread, DetectionEngine, ThreatLevel};
+use log::{debug, error, info, warn};
 use std::time::Instant;
 
 fn main() -> Result<()> {
@@ -40,14 +41,36 @@ fn main() -> Result<()> {
                 .short('o')
                 .long("output")
                 .value_name("FILE")
-                .help("Write results to file instead of stdout")
+                                .help("Write output to file instead of stdout"),
+        )
+        .arg(
+            Arg::new("debug")
+                .short('d')
+                .long("debug")
+                .action(clap::ArgAction::SetTrue)
+                .help("Enable debug logging"),
         )
         .get_matches();
+
+    // Initialize logging based on debug flag
+    if matches.get_flag("debug") {
+        env_logger::Builder::from_default_env()
+            .filter_level(log::LevelFilter::Debug)
+            .init();
+        debug!("Debug logging enabled");
+    } else {
+        env_logger::Builder::from_default_env()
+            .filter_level(log::LevelFilter::Info)
+            .init();
+    }
 
     let format = matches.get_one::<String>("format").unwrap();
     let verbose = matches.get_flag("verbose");
     let target_pid = matches.get_one::<String>("pid");
     let output_file = matches.get_one::<String>("output");
+
+    info!("Starting Ghost process injection detection");
+    debug!("Configuration - Format: {}, Verbose: {}, Target PID: {:?}", format, verbose, target_pid);
 
     println!("Ghost v0.1.0 - Process Injection Detection\n");
 
@@ -55,7 +78,12 @@ fn main() -> Result<()> {
     let mut engine = DetectionEngine::new();
     
     let processes = if let Some(pid_str) = target_pid {
-        let pid: u32 = pid_str.parse().map_err(|_| anyhow::anyhow!("Invalid PID format: {}", pid_str))?;
+        let pid: u32 = pid_str.parse().map_err(|e| {
+            error!("Invalid PID format '{}': {}", pid_str, e);
+            anyhow::anyhow!("Invalid PID format: {}", pid_str)
+        })?;
+        info!("Targeting specific process ID: {}", pid);
+        
         let all_processes = process::enumerate_processes()?;
         let filtered: Vec<_> = all_processes
             .into_iter()
@@ -63,11 +91,16 @@ fn main() -> Result<()> {
             .collect();
         
         if filtered.is_empty() {
+            warn!("No process found with PID {}", pid);
             println!("Warning: No process found with PID {}", pid);
+        } else {
+            debug!("Found target process: {}", filtered[0].name);
         }
         filtered
     } else {
-        process::enumerate_processes()?
+        let all_processes = process::enumerate_processes()?;
+        info!("Enumerating all processes, found {} total", all_processes.len());
+        all_processes
     };
 
     println!("Scanning {} processes...\n", processes.len());
@@ -79,23 +112,30 @@ fn main() -> Result<()> {
     for proc in &processes {
         // Skip known safe system processes for performance
         if proc.name == "csrss.exe" || proc.name == "wininit.exe" || proc.name == "winlogon.exe" {
+            debug!("Skipping safe system process: {}", proc.name);
             continue;
         }
         
         scanned_count += 1;
+        debug!("Scanning process: {} (PID: {})", proc.name, proc.pid);
         
         match memory::enumerate_memory_regions(proc.pid) {
             Ok(regions) => {
+                debug!("Found {} memory regions for process {}", regions.len(), proc.name);
                 // Get thread information if available
                 let threads = thread::enumerate_threads(proc.pid).ok();
                 let result = engine.analyze_process(proc, &regions, threads.as_deref());
 
                 if result.threat_level != ThreatLevel::Clean {
+                    warn!("Suspicious activity detected in process {} (PID: {})", proc.name, proc.pid);
                     detections.push(result);
+                } else {
+                    debug!("Process {} (PID: {}) is clean", proc.name, proc.pid);
                 }
             }
-            Err(_) => {
+            Err(e) => {
                 error_count += 1;
+                error!("Failed to scan process {} (PID: {}): {}", proc.name, proc.pid, e);
                 if verbose {
                     println!("Warning: Could not scan process {} (PID: {})", proc.name, proc.pid);
                 }
@@ -104,8 +144,11 @@ fn main() -> Result<()> {
     }
 
     if verbose && error_count > 0 {
+        warn!("Scan completed with {} access errors", error_count);
         println!("Scan completed with {} access errors", error_count);
     }
+
+    info!("Scan completed: {} processes scanned, {} suspicious processes found", scanned_count, detections.len());
 
     // Handle output
     let output_content = if detections.is_empty() {
@@ -140,10 +183,12 @@ fn main() -> Result<()> {
         use std::fs::File;
         use std::io::Write;
         
+        info!("Writing results to file: {}", output_path);
         let mut file = File::create(output_path)?;
         file.write_all(output_content.as_bytes())?;
         println!("Results written to {}", output_path);
     } else {
+        debug!("Writing results to stdout");
         print!("{}", output_content);
     }
 
