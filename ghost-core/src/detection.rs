@@ -1,4 +1,4 @@
-use crate::{detect_hook_injection, MemoryProtection, MemoryRegion, ProcessInfo, ShellcodeDetector, ThreadInfo};
+use crate::{detect_hook_injection, HollowingDetector, MemoryProtection, MemoryRegion, ProcessInfo, ShellcodeDetector, ThreadInfo};
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -19,6 +19,7 @@ pub struct DetectionResult {
 pub struct DetectionEngine {
     baseline: HashMap<u32, ProcessBaseline>,
     shellcode_detector: ShellcodeDetector,
+    hollowing_detector: HollowingDetector,
 }
 
 #[derive(Debug, Clone)]
@@ -32,6 +33,7 @@ impl DetectionEngine {
         Self {
             baseline: HashMap::new(),
             shellcode_detector: ShellcodeDetector::new(),
+            hollowing_detector: HollowingDetector::new(),
         }
     }
 
@@ -124,6 +126,14 @@ impl DetectionEngine {
                 ));
                 confidence += detection.confidence;
             }
+        }
+        
+        // Check for process hollowing
+        if let Ok(Some(hollowing_detection)) = self.hollowing_detector.analyze_process(process, memory_regions) {
+            for indicator in &hollowing_detection.indicators {
+                indicators.push(format!("Process hollowing: {}", indicator));
+            }
+            confidence += hollowing_detection.confidence;
         }
 
         self.baseline.insert(
