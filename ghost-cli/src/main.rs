@@ -1,5 +1,5 @@
 use anyhow::Result;
-use ghost_core::{memory, process, DetectionEngine, ThreatLevel};
+use ghost_core::{memory, process, thread, DetectionEngine, ThreatLevel};
 
 fn main() -> Result<()> {
     env_logger::init();
@@ -15,7 +15,9 @@ fn main() -> Result<()> {
 
     for proc in &processes {
         if let Ok(regions) = memory::enumerate_memory_regions(proc.pid) {
-            let result = engine.analyze_process(proc, &regions);
+            // Get thread information if available
+            let threads = thread::enumerate_threads(proc.pid).ok();
+            let result = engine.analyze_process(proc, &regions, threads.as_deref());
 
             if result.threat_level != ThreatLevel::Clean {
                 detections.push(result);
