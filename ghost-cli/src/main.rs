@@ -16,6 +16,7 @@ fn main() -> Result<()> {
                 .value_name("FORMAT")
                 .help("Output format: table, json")
                 .default_value("table")
+                .value_parser(["table", "json", "csv"])
         )
         .arg(
             Arg::new("verbose")
