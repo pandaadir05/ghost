@@ -1,6 +1,6 @@
 use anyhow::Result;
 use clap::{Arg, Command};
-use ghost_core::{memory, process, thread, DetectionEngine, ThreatLevel};
+use ghost_core::{memory, process, thread, DetectionEngine, DetectionConfig, ThreatLevel};
 use log::{debug, error, info, warn};
 use serde_json;
 use std::time::Instant;
@@ -64,6 +64,13 @@ fn main() -> Result<()> {
                 .action(clap::ArgAction::SetTrue)
                 .help("Suppress all output except errors"),
         )
+        .arg(
+            Arg::new("config")
+                .short('c')
+                .long("config")
+                .value_name("FILE")
+                .help("Load configuration from file"),
+        )
         .get_matches();
 
     // Initialize logging based on debug flag
@@ -84,16 +91,41 @@ fn main() -> Result<()> {
     let target_pid = matches.get_one::<String>("pid");
     let target_process = matches.get_one::<String>("process");
     let output_file = matches.get_one::<String>("output");
+    let config_file = matches.get_one::<String>("config");
+
+    // Load configuration if specified
+    let config = if let Some(config_path) = config_file {
+        info!("Loading configuration from: {}", config_path);
+        match DetectionConfig::load(config_path) {
+            Ok(cfg) => {
+                debug!("Configuration loaded successfully");
+                Some(cfg)
+            }
+            Err(e) => {
+                error!("Failed to load configuration from {}: {}", config_path, e);
+                if !quiet {
+                    eprintln!("Error: Failed to load configuration: {}", e);
+                }
+                return Err(e.into());
+            }
+        }
+    } else {
+        None
+    };
 
     info!("Starting Ghost process injection detection");
-    debug!("Configuration - Format: {}, Verbose: {}, Quiet: {}, Target PID: {:?}, Target Process: {:?}", format, verbose, quiet, target_pid, target_process);
+    debug!("Configuration - Format: {}, Verbose: {}, Quiet: {}, Target PID: {:?}, Target Process: {:?}, Config: {:?}", 
+           format, verbose, quiet, target_pid, target_process, config_file);
 
     if !quiet {
         println!("Ghost v0.1.0 - Process Injection Detection\n");
     }
 
     let scan_start = Instant::now();
-    let mut engine = DetectionEngine::new();
+    let mut engine = DetectionEngine::with_config(config).map_err(|e| {
+        error!("Failed to initialize detection engine: {}", e);
+        anyhow::anyhow!("Detection engine initialization failed: {}", e)
+    })?;
     
     let processes = if let Some(pid_str) = target_pid {
         let pid: u32 = pid_str.parse().map_err(|e| {

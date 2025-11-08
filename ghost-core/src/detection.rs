@@ -1,7 +1,7 @@
 use crate::{
     detect_hook_injection, AnomalyDetector, MemoryProtection, MemoryRegion, 
     ProcessInfo, ShellcodeDetector, ThreadInfo, ThreatIntelligence, ThreatContext,
-    EvasionDetector, EvasionResult
+    EvasionDetector, EvasionResult, DetectionConfig, GhostError
 };
 #[cfg(target_os = "linux")]
 use crate::EbpfDetector;
@@ -32,6 +32,7 @@ pub struct DetectionEngine {
     anomaly_detector: AnomalyDetector,
     threat_intelligence: ThreatIntelligence,
     evasion_detector: EvasionDetector,
+    config: Option<DetectionConfig>,
     #[cfg(target_os = "linux")]
     ebpf_detector: Option<EbpfDetector>,
 }
@@ -43,7 +44,11 @@ struct ProcessBaseline {
 }
 
 impl DetectionEngine {
-    pub fn new() -> Result<Self, DetectionError> {
+    pub fn new() -> Result<Self, GhostError> {
+        Self::with_config(None)
+    }
+
+    pub fn with_config(config: Option<DetectionConfig>) -> Result<Self, GhostError> {
         let baseline = ProcessBaseline::new();
         let shellcode_detector = ShellcodeDetector::new();
         let hollowing_detector = HollowingDetector::new();
@@ -74,6 +79,7 @@ impl DetectionEngine {
             anomaly_detector,
             threat_intelligence,
             evasion_detector,
+            config,
             #[cfg(target_os = "linux")]
             ebpf_detector,
         })
@@ -304,7 +310,7 @@ impl DetectionEngine {
 
     /// Process eBPF detection events (Linux only)
     #[cfg(target_os = "linux")]
-    pub fn process_ebpf_events(&mut self) -> Result<Vec<DetectionResult>, DetectionError> {
+    pub fn process_ebpf_events(&mut self) -> Result<Vec<DetectionResult>, GhostError> {
         if let Some(ref mut ebpf_detector) = self.ebpf_detector {
             match ebpf_detector.process_events() {
                 Ok(ebpf_events) => {
