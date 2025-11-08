@@ -1,7 +1,8 @@
-use crate::{
+﻿use crate::{
     detect_hook_injection, AnomalyDetector, MemoryProtection, MemoryRegion, 
     ProcessInfo, ShellcodeDetector, ThreadInfo, ThreatIntelligence, ThreatContext,
-    EvasionDetector, EvasionResult, DetectionConfig, GhostError
+    EvasionDetector, EvasionResult, DetectionConfig, GhostError,
+    MitreAttackEngine, MitreAnalysisResult,
 };
 #[cfg(target_os = "linux")]
 use crate::EbpfDetector;
@@ -23,6 +24,7 @@ pub struct DetectionResult {
     pub confidence: f32,
     pub threat_context: Option<ThreatContext>,
     pub evasion_analysis: Option<EvasionResult>,
+    pub mitre_analysis: Option<MitreAnalysisResult>,
 }
 
 pub struct DetectionEngine {
@@ -32,6 +34,7 @@ pub struct DetectionEngine {
     anomaly_detector: AnomalyDetector,
     threat_intelligence: ThreatIntelligence,
     evasion_detector: EvasionDetector,
+    mitre_engine: MitreAttackEngine,
     config: Option<DetectionConfig>,
     #[cfg(target_os = "linux")]
     ebpf_detector: Option<EbpfDetector>,
@@ -55,6 +58,7 @@ impl DetectionEngine {
         let anomaly_detector = AnomalyDetector::new();
         let threat_intelligence = ThreatIntelligence::new();
         let evasion_detector = EvasionDetector::new();
+        let mitre_engine = MitreAttackEngine::new()?;
         
         #[cfg(target_os = "linux")]
         let ebpf_detector = match EbpfDetector::new() {
@@ -79,6 +83,7 @@ impl DetectionEngine {
             anomaly_detector,
             threat_intelligence,
             evasion_detector,
+            mitre_engine,
             config,
             #[cfg(target_os = "linux")]
             ebpf_detector,
@@ -249,6 +254,7 @@ impl DetectionEngine {
             confidence,
             threat_context: None,
             evasion_analysis: None,
+            mitre_analysis: None,
         };
 
         // Enrich with threat intelligence (async operation would be handled by caller)
@@ -477,6 +483,64 @@ impl DetectionEngine {
         }
 
         data
+    }
+
+    /// Perform comprehensive MITRE ATT&CK analysis
+    pub async fn analyze_with_mitre(
+        &self,
+        process: &ProcessInfo,
+        memory_regions: &[MemoryRegion],
+        threads: &[ThreadInfo],
+    ) -> Result<MitreAnalysisResult, GhostError> {
+        self.mitre_engine.analyze_attack_patterns(process, memory_regions, threads).await
+    }
+
+    /// Enrich detection result with MITRE ATT&CK analysis
+    pub async fn enrich_with_mitre_analysis(
+        &self,
+        mut detection: DetectionResult,
+        memory_regions: &[MemoryRegion],
+        threads: &[ThreadInfo],
+    ) -> DetectionResult {
+        if let Ok(mitre_analysis) = self.mitre_engine.analyze_attack_patterns(&detection.process, memory_regions, threads).await {
+            // Update threat level based on MITRE analysis
+            if mitre_analysis.risk_assessment.overall_risk_score > 0.8 {
+                detection.threat_level = ThreatLevel::Malicious;
+            } else if mitre_analysis.risk_assessment.overall_risk_score > 0.5 {
+                if detection.threat_level == ThreatLevel::Clean {
+                    detection.threat_level = ThreatLevel::Suspicious;
+                }
+            }
+
+            // Add MITRE technique indicators
+            for technique in &mitre_analysis.detected_techniques {
+                detection.indicators.push(format!(
+                    "MITRE {}: {} (confidence: {:.1}%)",
+                    technique.technique.id,
+                    technique.technique.name,
+                    technique.confidence * 100.0
+                ));
+            }
+
+            // Add threat actor matches
+            for actor_match in &mitre_analysis.threat_actor_matches {
+                detection.indicators.push(format!(
+                    "Threat Actor Pattern: {} (match: {:.1}%)",
+                    actor_match.threat_actor.name,
+                    actor_match.match_confidence * 100.0
+                ));
+            }
+
+            // Update confidence with MITRE insights
+            detection.confidence = (detection.confidence + mitre_analysis.risk_assessment.overall_risk_score) / 2.0;
+            detection.mitre_analysis = Some(mitre_analysis);
+        }
+
+        detection
+    }
+
+    pub fn get_mitre_stats(&self) -> (usize, usize, usize) {
+        self.mitre_engine.get_framework_stats()
     }
 }
 
