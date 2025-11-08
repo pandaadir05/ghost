@@ -1,4 +1,4 @@
-use crate::{MemoryProtection, MemoryRegion, ProcessInfo, ThreadInfo};
+use crate::{detect_hook_injection, MemoryProtection, MemoryRegion, ProcessInfo, ThreadInfo};
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -93,6 +93,22 @@ impl DetectionEngine {
         // Analyze threads if provided
         if let Some(thread_list) = threads {
             self.analyze_threads(thread_list, &mut indicators, &mut confidence);
+        }
+        
+        // Check for Windows hook injection
+        if let Ok(hook_result) = detect_hook_injection(process.pid) {
+            if hook_result.suspicious_count > 0 {
+                indicators.push(format!(
+                    "{} suspicious Windows hooks detected",
+                    hook_result.suspicious_count
+                ));
+                confidence += 0.6; // High confidence for hook-based injection
+            }
+            
+            if hook_result.global_hooks > 8 {
+                indicators.push("Excessive global hooks (possible system compromise)".to_string());
+                confidence += 0.3;
+            }
         }
 
         self.baseline.insert(

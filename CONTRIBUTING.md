@@ -9,7 +9,7 @@
 
 ### Building
 ```bash
-git clone https://github.com/yourusername/ghost.git
+git clone https://github.com/pandaadir05/ghost.git
 cd ghost
 cargo build
 ```
@@ -145,4 +145,4 @@ Open an issue for:
 - Documentation improvements
 - Design discussions
 
-For security issues, email: security@ghost-project.dev
+For security issues, email: .
