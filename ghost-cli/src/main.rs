@@ -37,6 +37,12 @@ fn main() -> Result<()> {
                 .help("Target specific process ID")
         )
         .arg(
+            Arg::new("process")
+                .long("process")
+                .value_name("NAME")
+                .help("Target specific process name")
+        )
+        .arg(
             Arg::new("output")
                 .short('o')
                 .long("output")
@@ -75,10 +81,11 @@ fn main() -> Result<()> {
     let verbose = matches.get_flag("verbose");
     let quiet = matches.get_flag("quiet");
     let target_pid = matches.get_one::<String>("pid");
+    let target_process = matches.get_one::<String>("process");
     let output_file = matches.get_one::<String>("output");
 
     info!("Starting Ghost process injection detection");
-    debug!("Configuration - Format: {}, Verbose: {}, Quiet: {}, Target PID: {:?}", format, verbose, quiet, target_pid);
+    debug!("Configuration - Format: {}, Verbose: {}, Quiet: {}, Target PID: {:?}, Target Process: {:?}", format, verbose, quiet, target_pid, target_process);
 
     if !quiet {
         println!("Ghost v0.1.0 - Process Injection Detection\n");
@@ -107,6 +114,24 @@ fn main() -> Result<()> {
             }
         } else {
             debug!("Found target process: {}", filtered[0].name);
+        }
+        filtered
+    } else if let Some(process_name) = target_process {
+        info!("Targeting processes with name: {}", process_name);
+        let all_processes = process::enumerate_processes()?;
+        let filtered: Vec<_> = all_processes
+            .into_iter()
+            .filter(|p| p.name.to_lowercase().contains(&process_name.to_lowercase()))
+            .collect();
+        
+        if filtered.is_empty() {
+            warn!("No processes found matching name: {}", process_name);
+            if !quiet {
+                println!("Warning: No processes found matching name: {}", process_name);
+            }
+        } else {
+            info!("Found {} processes matching name: {}", filtered.len(), process_name);
+            debug!("Matching processes: {:?}", filtered.iter().map(|p| format!("{} ({})", p.name, p.pid)).collect::<Vec<_>>());
         }
         filtered
     } else {
