@@ -81,12 +81,6 @@ We follow responsible disclosure practices:
 - Social engineering attacks
 - Third-party dependency vulnerabilities (unless exploitable through Ghost)
 
-### Contact Information
-
-- **Security Team**: security@ghost-project.dev
-- **General Issues**: https://github.com/ghost-project/ghost/issues
-- **Discussions**: https://github.com/ghost-project/ghost/discussions
-
 ---
 
-*Last updated: November 2024*
+*Last updated: November 2025*
