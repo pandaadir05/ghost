@@ -50,6 +50,13 @@ fn main() -> Result<()> {
                 .action(clap::ArgAction::SetTrue)
                 .help("Enable debug logging"),
         )
+        .arg(
+            Arg::new("quiet")
+                .short('q')
+                .long("quiet")
+                .action(clap::ArgAction::SetTrue)
+                .help("Suppress all output except errors"),
+        )
         .get_matches();
 
     // Initialize logging based on debug flag
@@ -66,13 +73,16 @@ fn main() -> Result<()> {
 
     let format = matches.get_one::<String>("format").unwrap();
     let verbose = matches.get_flag("verbose");
+    let quiet = matches.get_flag("quiet");
     let target_pid = matches.get_one::<String>("pid");
     let output_file = matches.get_one::<String>("output");
 
     info!("Starting Ghost process injection detection");
-    debug!("Configuration - Format: {}, Verbose: {}, Target PID: {:?}", format, verbose, target_pid);
+    debug!("Configuration - Format: {}, Verbose: {}, Quiet: {}, Target PID: {:?}", format, verbose, quiet, target_pid);
 
-    println!("Ghost v0.1.0 - Process Injection Detection\n");
+    if !quiet {
+        println!("Ghost v0.1.0 - Process Injection Detection\n");
+    }
 
     let scan_start = Instant::now();
     let mut engine = DetectionEngine::new();
@@ -92,7 +102,9 @@ fn main() -> Result<()> {
         
         if filtered.is_empty() {
             warn!("No process found with PID {}", pid);
-            println!("Warning: No process found with PID {}", pid);
+            if !quiet {
+                println!("Warning: No process found with PID {}", pid);
+            }
         } else {
             debug!("Found target process: {}", filtered[0].name);
         }
@@ -103,7 +115,9 @@ fn main() -> Result<()> {
         all_processes
     };
 
-    println!("Scanning {} processes...\n", processes.len());
+    if !quiet {
+        println!("Scanning {} processes...\n", processes.len());
+    }
 
     let mut detections = Vec::new();
     let mut scanned_count = 0;
@@ -136,14 +150,14 @@ fn main() -> Result<()> {
             Err(e) => {
                 error_count += 1;
                 error!("Failed to scan process {} (PID: {}): {}", proc.name, proc.pid, e);
-                if verbose {
+                if verbose && !quiet {
                     println!("Warning: Could not scan process {} (PID: {})", proc.name, proc.pid);
                 }
             }
         }
     }
 
-    if verbose && error_count > 0 {
+    if verbose && error_count > 0 && !quiet {
         warn!("Scan completed with {} access errors", error_count);
         println!("Scan completed with {} access errors", error_count);
     }
@@ -186,10 +200,14 @@ fn main() -> Result<()> {
         info!("Writing results to file: {}", output_path);
         let mut file = File::create(output_path)?;
         file.write_all(output_content.as_bytes())?;
-        println!("Results written to {}", output_path);
+        if !quiet {
+            println!("Results written to {}", output_path);
+        }
     } else {
         debug!("Writing results to stdout");
-        print!("{}", output_content);
+        if !quiet || !detections.is_empty() {
+            print!("{}", output_content);
+        }
     }
 
     Ok(())
