@@ -13,7 +13,11 @@ fn main() -> Result<()> {
         .about("Cross-Platform Process Injection Detection Framework")
         .long_about("Ghost scans running processes for signs of code injection, \
                      process hollowing, and other malicious techniques. \
-                     Supports Windows and Linux platforms with kernel-level monitoring.")
+                     Supports Windows and Linux platforms with kernel-level monitoring.\n\n\
+                     Exit Codes:\n\
+                     0 - No suspicious activity detected\n\
+                     1 - Suspicious processes found\n\
+                     2 - Error occurred during scanning")
         .arg(
             Arg::new("format")
                 .short('f')
@@ -288,5 +292,15 @@ fn main() -> Result<()> {
         }
     }
 
-    Ok(())
+    // Exit with appropriate code for automation
+    let exit_code = if error_count > 0 {
+        2  // Error occurred during scanning
+    } else if !detections.is_empty() {
+        1  // Suspicious processes found
+    } else {
+        0  // Clean scan
+    };
+
+    debug!("Exiting with code: {}", exit_code);
+    std::process::exit(exit_code);
 }
