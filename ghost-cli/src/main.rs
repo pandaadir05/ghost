@@ -9,6 +9,9 @@ fn main() -> Result<()> {
     let matches = Command::new("ghost")
         .version("0.1.0")
         .about("Cross-Platform Process Injection Detection Framework")
+        .long_about("Ghost scans running processes for signs of code injection, \
+                     process hollowing, and other malicious techniques. \
+                     Supports Windows and Linux platforms with kernel-level monitoring.")
         .arg(
             Arg::new("format")
                 .short('f')
