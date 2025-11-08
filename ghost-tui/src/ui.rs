@@ -12,7 +12,7 @@ use ratatui::{
     Frame,
 };
 
-// Cyberpunk-inspired color scheme
+// Define color constants for consistent theming
 const PRIMARY_COLOR: Color = Color::Cyan;
 const SECONDARY_COLOR: Color = Color::Magenta;
 const SUCCESS_COLOR: Color = Color::Green;
