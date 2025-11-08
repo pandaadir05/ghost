@@ -103,7 +103,7 @@ mod platform {
                     let region_type = if mbi.Type == MEM_IMAGE {
                         "IMAGE"
                     } else if mbi.Type == MEM_MAPPED {
-                        "MAPPED"
+                        "MAPPED" 
                     } else if mbi.Type == MEM_PRIVATE {
                         "PRIVATE"
                     } else {
