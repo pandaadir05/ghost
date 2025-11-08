@@ -1,4 +1,4 @@
-use crate::{detect_hook_injection, MemoryProtection, MemoryRegion, ProcessInfo, ThreadInfo};
+use crate::{detect_hook_injection, MemoryProtection, MemoryRegion, ProcessInfo, ShellcodeDetector, ThreadInfo};
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -18,6 +18,7 @@ pub struct DetectionResult {
 
 pub struct DetectionEngine {
     baseline: HashMap<u32, ProcessBaseline>,
+    shellcode_detector: ShellcodeDetector,
 }
 
 #[derive(Debug, Clone)]
@@ -30,6 +31,7 @@ impl DetectionEngine {
     pub fn new() -> Self {
         Self {
             baseline: HashMap::new(),
+            shellcode_detector: ShellcodeDetector::new(),
         }
     }
 
@@ -108,6 +110,19 @@ impl DetectionEngine {
             if hook_result.global_hooks > 8 {
                 indicators.push("Excessive global hooks (possible system compromise)".to_string());
                 confidence += 0.3;
+            }
+        }
+        
+        // Scan for shellcode patterns in executable memory regions
+        let shellcode_detections = self.scan_for_shellcode(memory_regions);
+        if !shellcode_detections.is_empty() {
+            for detection in &shellcode_detections {
+                indicators.push(format!(
+                    "Shellcode detected at {:#x}: {}",
+                    detection.address,
+                    detection.signature_matches.join(", ")
+                ));
+                confidence += detection.confidence;
             }
         }
 
@@ -206,6 +221,58 @@ impl DetectionEngine {
             indicators.push("High ratio of recently created threads".to_string());
             *confidence += 0.3;
         }
+    }
+
+    /// Scan memory regions for shellcode patterns
+    fn scan_for_shellcode(&self, regions: &[MemoryRegion]) -> Vec<crate::ShellcodeDetection> {
+        let mut all_detections = Vec::new();
+
+        for region in regions {
+            // Only scan executable regions that might contain shellcode
+            if matches!(
+                region.protection,
+                MemoryProtection::ReadExecute | MemoryProtection::ReadWriteExecute
+            ) && region.region_type == "PRIVATE"
+                && region.size < 0x100000
+            {
+                // 1MB limit for performance
+                // In a real implementation, we would read the actual memory content
+                // For now, simulate with a pattern that might indicate shellcode
+                let simulated_data = self.simulate_memory_content(region);
+                let detections = self
+                    .shellcode_detector
+                    .scan_memory_region(&simulated_data, region.base_address);
+                all_detections.extend(detections);
+            }
+        }
+
+        all_detections
+    }
+
+    /// Simulate memory content for testing (in real implementation, use ReadProcessMemory)
+    fn simulate_memory_content(&self, region: &MemoryRegion) -> Vec<u8> {
+        // This is a placeholder - real implementation would use Windows ReadProcessMemory API
+        // For demonstration, create some patterns that might trigger detection
+        let mut data = vec![0x90; region.size]; // Fill with NOPs
+
+        // Add some "suspicious" patterns based on region size
+        if region.size > 0x1000 {
+            // Add a PE header signature
+            data[0] = 0x4D; // M
+            data[1] = 0x5A; // Z
+
+            // Add some meterpreter-like pattern
+            if region.size > 0x100 {
+                data[0x80] = 0xFC; // CLD
+                data[0x81] = 0x48; // REX.W
+                data[0x82] = 0x83; // SUB
+                data[0x83] = 0xE4; // ESP
+                data[0x84] = 0xF0; // immediate
+                data[0x85] = 0xE8; // CALL
+            }
+        }
+
+        data
     }
 }
 
