@@ -24,16 +24,33 @@ fn main() -> Result<()> {
                 .help("Enable verbose output")
                 .action(clap::ArgAction::SetTrue)
         )
+        .arg(
+            Arg::new("pid")
+                .short('p')
+                .long("pid")
+                .value_name("PID")
+                .help("Target specific process ID")
+        )
         .get_matches();
 
     let format = matches.get_one::<String>("format").unwrap();
     let verbose = matches.get_flag("verbose");
+    let target_pid = matches.get_one::<String>("pid");
 
     println!("Ghost v0.1.0 - Process Injection Detection\n");
 
     let scan_start = Instant::now();
     let mut engine = DetectionEngine::new();
-    let processes = process::enumerate_processes()?;
+    
+    let processes = if let Some(pid_str) = target_pid {
+        let pid: u32 = pid_str.parse().expect("Invalid PID format");
+        process::enumerate_processes()?
+            .into_iter()
+            .filter(|p| p.pid == pid)
+            .collect()
+    } else {
+        process::enumerate_processes()?
+    };
 
     println!("Scanning {} processes...\n", processes.len());
 
