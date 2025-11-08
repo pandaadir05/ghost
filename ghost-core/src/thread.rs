@@ -5,6 +5,7 @@ pub struct ThreadInfo {
     pub tid: u32,
     pub owner_pid: u32,
     pub start_address: usize,
+    pub creation_time: u64,
 }
 
 impl fmt::Display for ThreadInfo {
@@ -45,6 +46,7 @@ mod platform {
                             tid: entry.th32ThreadID,
                             owner_pid: entry.th32OwnerProcessID,
                             start_address: 0, // TODO: Get actual start address
+                            creation_time: 0, // TODO: Get thread creation time
                         });
                     }
 
