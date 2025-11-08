@@ -1,11 +1,37 @@
 use anyhow::Result;
+use clap::{Arg, Command};
 use ghost_core::{memory, process, thread, DetectionEngine, ThreatLevel};
+use std::time::Instant;
 
 fn main() -> Result<()> {
     env_logger::init();
 
+    let matches = Command::new("ghost")
+        .version("0.1.0")
+        .about("Cross-Platform Process Injection Detection Framework")
+        .arg(
+            Arg::new("format")
+                .short('f')
+                .long("format")
+                .value_name("FORMAT")
+                .help("Output format: table, json")
+                .default_value("table")
+        )
+        .arg(
+            Arg::new("verbose")
+                .short('v')
+                .long("verbose")
+                .help("Enable verbose output")
+                .action(clap::ArgAction::SetTrue)
+        )
+        .get_matches();
+
+    let format = matches.get_one::<String>("format").unwrap();
+    let verbose = matches.get_flag("verbose");
+
     println!("Ghost v0.1.0 - Process Injection Detection\n");
 
+    let scan_start = Instant::now();
     let mut engine = DetectionEngine::new();
     let processes = process::enumerate_processes()?;
 
