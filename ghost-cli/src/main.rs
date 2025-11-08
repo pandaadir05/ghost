@@ -35,11 +35,19 @@ fn main() -> Result<()> {
                 .value_name("PID")
                 .help("Target specific process ID")
         )
+        .arg(
+            Arg::new("output")
+                .short('o')
+                .long("output")
+                .value_name("FILE")
+                .help("Write results to file instead of stdout")
+        )
         .get_matches();
 
     let format = matches.get_one::<String>("format").unwrap();
     let verbose = matches.get_flag("verbose");
     let target_pid = matches.get_one::<String>("pid");
+    let output_file = matches.get_one::<String>("output");
 
     println!("Ghost v0.1.0 - Process Injection Detection\n");
 
@@ -99,10 +107,11 @@ fn main() -> Result<()> {
         println!("Scan completed with {} access errors", error_count);
     }
 
-    if detections.is_empty() {
-        println!("No suspicious activity detected.");
+    // Handle output
+    let output_content = if detections.is_empty() {
+        "No suspicious activity detected.".to_string()
     } else {
-        println!("Found {} suspicious processes:\n", detections.len());
+        let mut content = format!("Found {} suspicious processes:\n\n", detections.len());
 
         for detection in detections {
             let level_str = match detection.threat_level {
@@ -111,19 +120,31 @@ fn main() -> Result<()> {
                 _ => "CLEAN",
             };
 
-            println!(
-                "[{}] {} (PID: {}) - Confidence: {:.1}%",
+            content.push_str(&format!(
+                "[{}] {} (PID: {}) - Confidence: {:.1}%\n",
                 level_str,
                 detection.process.name,
                 detection.process.pid,
                 detection.confidence * 100.0
-            );
+            ));
 
             for indicator in &detection.indicators {
-                println!("  - {}", indicator);
+                content.push_str(&format!("  - {}\n", indicator));
             }
-            println!();
+            content.push('\n');
         }
+        content
+    };
+
+    if let Some(output_path) = output_file {
+        use std::fs::File;
+        use std::io::Write;
+        
+        let mut file = File::create(output_path)?;
+        file.write_all(output_content.as_bytes())?;
+        println!("Results written to {}", output_path);
+    } else {
+        print!("{}", output_content);
     }
 
     Ok(())
