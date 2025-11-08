@@ -2,6 +2,7 @@ use anyhow::Result;
 use clap::{Arg, Command};
 use ghost_core::{memory, process, thread, DetectionEngine, ThreatLevel};
 use log::{debug, error, info, warn};
+use serde_json;
 use std::time::Instant;
 
 fn main() -> Result<()> {
@@ -190,32 +191,52 @@ fn main() -> Result<()> {
     info!("Scan completed: {} processes scanned, {} suspicious processes found", scanned_count, detections.len());
 
     // Handle output
-    let output_content = if detections.is_empty() {
-        "No suspicious activity detected.".to_string()
-    } else {
-        let mut content = format!("Found {} suspicious processes:\n\n", detections.len());
-
-        for detection in detections {
-            let level_str = match detection.threat_level {
-                ThreatLevel::Suspicious => "SUSPICIOUS",
-                ThreatLevel::Malicious => "MALICIOUS",
-                _ => "CLEAN",
-            };
-
-            content.push_str(&format!(
-                "[{}] {} (PID: {}) - Confidence: {:.1}%\n",
-                level_str,
-                detection.process.name,
-                detection.process.pid,
-                detection.confidence * 100.0
-            ));
-
-            for indicator in &detection.indicators {
-                content.push_str(&format!("  - {}\n", indicator));
+    let output_content = match format.as_str() {
+        "json" => {
+            if detections.is_empty() {
+                serde_json::json!({
+                    "status": "clean",
+                    "message": "No suspicious activity detected",
+                    "detections": []
+                }).to_string()
+            } else {
+                serde_json::json!({
+                    "status": "suspicious", 
+                    "message": format!("Found {} suspicious processes", detections.len()),
+                    "detections": &detections
+                }).to_string()
             }
-            content.push('\n');
         }
-        content
+        _ => {
+            // Default table format
+            if detections.is_empty() {
+                "No suspicious activity detected.".to_string()
+            } else {
+                let mut content = format!("Found {} suspicious processes:\n\n", detections.len());
+
+                for detection in &detections {
+                    let level_str = match detection.threat_level {
+                        ThreatLevel::Suspicious => "SUSPICIOUS",
+                        ThreatLevel::Malicious => "MALICIOUS",
+                        _ => "CLEAN",
+                    };
+
+                    content.push_str(&format!(
+                        "[{}] {} (PID: {}) - Confidence: {:.1}%\n",
+                        level_str,
+                        detection.process.name,
+                        detection.process.pid,
+                        detection.confidence * 100.0
+                    ));
+
+                    for indicator in &detection.indicators {
+                        content.push_str(&format!("  - {}\n", indicator));
+                    }
+                    content.push('\n');
+                }
+                content
+            }
+        }
     };
 
     if let Some(output_path) = output_file {

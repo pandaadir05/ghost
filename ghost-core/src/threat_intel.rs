@@ -38,7 +38,7 @@ pub enum IocType {
     Mutex,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ThreatContext {
     pub matched_iocs: Vec<IndicatorOfCompromise>,
     pub threat_actor: Option<ThreatActor>,

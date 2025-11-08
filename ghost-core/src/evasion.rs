@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::time::{SystemTime, Duration};
+use serde::{Deserialize, Serialize};
 use crate::{ProcessInfo, MemoryRegion, ThreadInfo, MemoryProtection};
 
 /// Advanced Evasion Detection Module
@@ -11,7 +12,7 @@ pub struct EvasionDetector {
     obfuscation_detector: ObfuscationDetector,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EvasionResult {
     pub evasion_techniques: Vec<EvasionTechnique>,
     pub confidence: f32,
@@ -19,7 +20,7 @@ pub struct EvasionResult {
     pub anti_analysis_indicators: Vec<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EvasionTechnique {
     pub technique_name: String,
     pub mitre_id: String,
@@ -29,7 +30,7 @@ pub struct EvasionTechnique {
     pub severity: EvasionSeverity,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum EvasionSeverity {
     Low,       // Basic evasion attempts
     Medium,    // Moderate sophistication

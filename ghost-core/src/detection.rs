@@ -5,16 +5,17 @@ use crate::{
 };
 #[cfg(target_os = "linux")]
 use crate::EbpfDetector;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ThreatLevel {
     Clean,
     Suspicious,
     Malicious,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DetectionResult {
     pub process: ProcessInfo,
     pub threat_level: ThreatLevel,
