@@ -9,7 +9,7 @@ fn main() -> Result<()> {
     env_logger::init();
 
     let matches = Command::new("ghost")
-        .version("0.1.0")
+        .version(env!("CARGO_PKG_VERSION"))
         .about("Cross-Platform Process Injection Detection Framework")
         .long_about("Ghost scans running processes for signs of code injection, \
                      process hollowing, and other malicious techniques. \
@@ -118,7 +118,7 @@ fn main() -> Result<()> {
            format, verbose, quiet, target_pid, target_process, config_file);
 
     if !quiet {
-        println!("Ghost v0.1.0 - Process Injection Detection\n");
+        println!("Ghost v{} - Process Injection Detection\n", env!("CARGO_PKG_VERSION"));
     }
 
     let scan_start = Instant::now();
