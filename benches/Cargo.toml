@@ -1,0 +1,15 @@
+[package]
+name = "ghost-bench"
+version = "0.1.0"
+edition = "2021"
+
+[[bench]]
+name = "detection_performance"
+harness = false
+
+[dependencies]
+ghost-core = { path = "../ghost-core" }
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[dev-dependencies]
+pprof = { version = "0.13", features = ["criterion", "flamegraph"] }
