@@ -2,6 +2,7 @@ use anyhow::Result;
 use chrono::{DateTime, Utc};
 use ghost_core::{
     DetectionEngine, DetectionResult, ProcessInfo, ThreatLevel, 
+    ThreatIntelligence, ThreatContext, IndicatorOfCompromise,
     memory, process, thread
 };
 use ratatui::widgets::{ListState, TableState};
@@ -14,8 +15,9 @@ pub enum TabIndex {
     Overview = 0,
     Processes = 1,
     Detections = 2,
-    Memory = 3,
-    Logs = 4,
+    ThreatIntel = 3,
+    Memory = 4,
+    Logs = 5,
 }
 
 impl TabIndex {
@@ -24,14 +26,15 @@ impl TabIndex {
             0 => TabIndex::Overview,
             1 => TabIndex::Processes,
             2 => TabIndex::Detections,
-            3 => TabIndex::Memory,
-            4 => TabIndex::Logs,
+            3 => TabIndex::ThreatIntel,
+            4 => TabIndex::Memory,
+            5 => TabIndex::Logs,
             _ => TabIndex::Overview,
         }
     }
 
     pub fn next(self) -> Self {
-        Self::from_index((self as usize + 1) % 5)
+        Self::from_index((self as usize + 1) % 6)
     }
 }
 
@@ -42,6 +45,23 @@ pub struct DetectionEvent {
     pub threat_level: ThreatLevel,
     pub indicators: Vec<String>,
     pub confidence: f32,
+    pub threat_context: Option<ThreatContext>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ThreatIntelData {
+    pub total_iocs: usize,
+    pub recent_iocs: Vec<IndicatorOfCompromise>,
+    pub active_threats: Vec<String>,
+    pub threat_feed_status: Vec<FeedStatus>,
+}
+
+#[derive(Debug, Clone)]
+pub struct FeedStatus {
+    pub name: String,
+    pub status: String,
+    pub last_update: String,
+    pub ioc_count: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -58,16 +78,19 @@ pub struct SystemStats {
 pub struct App {
     pub current_tab: TabIndex,
     pub detection_engine: DetectionEngine,
+    pub threat_intel: ThreatIntelligence,
     pub processes: Vec<ProcessInfo>,
     pub detections: VecDeque<DetectionEvent>,
     pub logs: VecDeque<String>,
     pub stats: SystemStats,
+    pub threat_intel_data: ThreatIntelData,
     pub last_scan: Option<Instant>,
     
     // UI state
     pub processes_state: TableState,
     pub detections_state: ListState,
     pub logs_state: ListState,
+    pub threat_intel_state: ListState,
     pub selected_process: Option<ProcessInfo>,
     
     // Settings
@@ -78,9 +101,13 @@ pub struct App {
 
 impl App {
     pub async fn new() -> Result<Self> {
+        let mut threat_intel = ThreatIntelligence::new();
+        threat_intel.initialize_default_feeds().await?;
+        
         let mut app = Self {
             current_tab: TabIndex::Overview,
             detection_engine: DetectionEngine::new(),
+            threat_intel,
             processes: Vec::new(),
             detections: VecDeque::new(),
             logs: VecDeque::new(),
@@ -92,10 +119,17 @@ impl App {
                 scan_time_ms: 0,
                 memory_usage_mb: 0.0,
             },
+            threat_intel_data: ThreatIntelData {
+                total_iocs: 0,
+                recent_iocs: Vec::new(),
+                active_threats: Vec::new(),
+                threat_feed_status: Vec::new(),
+            },
             last_scan: None,
             processes_state: TableState::default(),
             detections_state: ListState::default(),
             logs_state: ListState::default(),
+            threat_intel_state: ListState::default(),
             selected_process: None,
             auto_refresh: true,
             max_log_entries: 1000,
@@ -149,6 +183,7 @@ impl App {
                         threat_level: result.threat_level,
                         indicators: result.indicators,
                         confidence: result.confidence,
+                        threat_context: None, // TODO: Integrate threat intelligence
                     });
                 }
             }
