@@ -1,4 +1,10 @@
-use crate::{detect_hook_injection, HollowingDetector, MemoryProtection, MemoryRegion, ProcessInfo, ShellcodeDetector, ThreadInfo};
+use crate::{
+    detect_hook_injection, AnomalyDetector, MemoryProtection, MemoryRegion, 
+    ProcessInfo, ShellcodeDetector, ThreadInfo, ThreatIntelligence, ThreatContext,
+    EvasionDetector, EvasionResult
+};
+#[cfg(target_os = "linux")]
+use crate::EbpfDetector;
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -14,12 +20,19 @@ pub struct DetectionResult {
     pub threat_level: ThreatLevel,
     pub indicators: Vec<String>,
     pub confidence: f32,
+    pub threat_context: Option<ThreatContext>,
+    pub evasion_analysis: Option<EvasionResult>,
 }
 
 pub struct DetectionEngine {
     baseline: HashMap<u32, ProcessBaseline>,
     shellcode_detector: ShellcodeDetector,
     hollowing_detector: HollowingDetector,
+    anomaly_detector: AnomalyDetector,
+    threat_intelligence: ThreatIntelligence,
+    evasion_detector: EvasionDetector,
+    #[cfg(target_os = "linux")]
+    ebpf_detector: Option<EbpfDetector>,
 }
 
 #[derive(Debug, Clone)]
@@ -29,12 +42,40 @@ struct ProcessBaseline {
 }
 
 impl DetectionEngine {
-    pub fn new() -> Self {
-        Self {
-            baseline: HashMap::new(),
-            shellcode_detector: ShellcodeDetector::new(),
-            hollowing_detector: HollowingDetector::new(),
-        }
+    pub fn new() -> Result<Self, DetectionError> {
+        let baseline = ProcessBaseline::new();
+        let shellcode_detector = ShellcodeDetector::new();
+        let hollowing_detector = HollowingDetector::new();
+        let anomaly_detector = AnomalyDetector::new();
+        let threat_intelligence = ThreatIntelligence::new();
+        let evasion_detector = EvasionDetector::new();
+        
+        #[cfg(target_os = "linux")]
+        let ebpf_detector = match EbpfDetector::new() {
+            Ok(mut detector) => {
+                if let Err(e) = detector.initialize() {
+                    eprintln!("Warning: Failed to initialize eBPF detector: {:?}", e);
+                    None
+                } else {
+                    Some(detector)
+                }
+            }
+            Err(e) => {
+                eprintln!("Warning: Failed to create eBPF detector: {:?}", e);
+                None
+            }
+        };
+        
+        Ok(DetectionEngine {
+            baseline,
+            shellcode_detector,
+            hollowing_detector,
+            anomaly_detector,
+            threat_intelligence,
+            evasion_detector,
+            #[cfg(target_os = "linux")]
+            ebpf_detector,
+        })
     }
 
     /// Analyze process for injection indicators with thread information
@@ -135,6 +176,47 @@ impl DetectionEngine {
             }
             confidence += hollowing_detection.confidence;
         }
+        
+        // ML-based anomaly detection
+        let features = self.anomaly_detector.extract_features(process, memory_regions, threads);
+        if let Ok(anomaly_score) = self.anomaly_detector.analyze_anomaly(process, &features) {
+            if self.anomaly_detector.is_anomalous(&anomaly_score) {
+                indicators.push(format!(
+                    "ML anomaly detected: {:.1}% confidence",
+                    anomaly_score.overall_score * 100.0
+                ));
+                
+                for outlier in &anomaly_score.outlier_features {
+                    indicators.push(format!("Outlier: {}", outlier));
+                }
+                
+                confidence += anomaly_score.overall_score * anomaly_score.confidence;
+            }
+        }
+
+        // Advanced evasion detection
+        let evasion_result = self.evasion_detector.analyze_evasion(process, memory_regions, threads);
+        if evasion_result.confidence > 0.3 {
+            for technique in &evasion_result.evasion_techniques {
+                indicators.push(format!(
+                    "Evasion technique: {} (confidence: {:.1}%)",
+                    technique.technique_name,
+                    technique.confidence * 100.0
+                ));
+            }
+            
+            for indicator in &evasion_result.anti_analysis_indicators {
+                indicators.push(format!("Anti-analysis: {}", indicator));
+            }
+            
+            // Increase confidence based on evasion sophistication
+            confidence += evasion_result.confidence * 0.4;
+            
+            // Boost threat level for sophisticated evasion
+            if evasion_result.sophistication_score > 0.7 {
+                confidence += 0.2; // Additional boost for advanced evasion
+            }
+        }
 
         self.baseline.insert(
             process.pid,
@@ -152,12 +234,117 @@ impl DetectionEngine {
             ThreatLevel::Clean
         };
 
-        DetectionResult {
+        // Create initial detection result
+        let mut detection_result = DetectionResult {
             process: process.clone(),
             threat_level,
             indicators,
             confidence,
+            threat_context: None,
+            evasion_analysis: None,
+        };
+
+        // Enrich with threat intelligence (async operation would be handled by caller)
+        // For now, we'll set a placeholder that can be enriched later
+        detection_result
+    }
+
+    /// Enrich detection result with threat intelligence
+    pub async fn enrich_with_threat_intel(&self, mut detection: DetectionResult) -> DetectionResult {
+        let threat_context = self.threat_intelligence.enrich_detection(&detection).await;
+        
+        // Update threat level based on threat intelligence findings
+        if threat_context.risk_score > 0.8 {
+            detection.threat_level = ThreatLevel::Malicious;
+            detection.confidence = (detection.confidence + threat_context.risk_score) / 2.0;
+        } else if threat_context.risk_score > 0.5 {
+            detection.threat_level = ThreatLevel::Suspicious;
+            detection.confidence = (detection.confidence + threat_context.risk_score * 0.7) / 2.0;
         }
+
+        // Add threat intelligence indicators
+        for ioc in &threat_context.matched_iocs {
+            detection.indicators.push(format!("IOC Match: {} ({})", ioc.value, ioc.source));
+        }
+
+        if let Some(actor) = &threat_context.threat_actor {
+            detection.indicators.push(format!("Attributed to: {}", actor.name));
+        }
+
+        detection.threat_context = Some(threat_context);
+        detection
+    }
+
+    /// Perform comprehensive analysis including evasion detection
+    pub fn analyze_process_comprehensive(
+        &mut self,
+        process: &ProcessInfo,
+        memory_regions: &[MemoryRegion],
+        threads: &[ThreadInfo],
+    ) -> DetectionResult {
+        // Perform standard detection
+        let mut detection_result = self.analyze_process(process, memory_regions, threads);
+        
+        // Add evasion analysis
+        let evasion_result = self.evasion_detector.analyze_evasion(process, memory_regions, threads);
+        
+        // Update threat level based on evasion analysis
+        if evasion_result.confidence > 0.7 {
+            detection_result.threat_level = ThreatLevel::Malicious;
+            detection_result.confidence = (detection_result.confidence + evasion_result.confidence) / 2.0;
+        } else if evasion_result.confidence > 0.4 {
+            detection_result.threat_level = ThreatLevel::Suspicious;
+            detection_result.confidence = (detection_result.confidence + evasion_result.confidence * 0.7) / 2.0;
+        }
+        
+        detection_result.evasion_analysis = Some(evasion_result);
+        detection_result
+    }
+
+    /// Process eBPF detection events (Linux only)
+    #[cfg(target_os = "linux")]
+    pub fn process_ebpf_events(&mut self) -> Result<Vec<DetectionResult>, DetectionError> {
+        if let Some(ref mut ebpf_detector) = self.ebpf_detector {
+            match ebpf_detector.process_events() {
+                Ok(ebpf_events) => {
+                    let mut detection_results = Vec::new();
+                    
+                    for ebpf_event in ebpf_events {
+                        // Convert eBPF detection event to standard DetectionResult
+                        let detection_result = DetectionResult {
+                            process: ebpf_event.process_info,
+                            threat_level: match ebpf_event.severity {
+                                crate::ebpf::EventSeverity::Info => ThreatLevel::Clean,
+                                crate::ebpf::EventSeverity::Low => ThreatLevel::Clean,
+                                crate::ebpf::EventSeverity::Medium => ThreatLevel::Suspicious,
+                                crate::ebpf::EventSeverity::High => ThreatLevel::Malicious,
+                                crate::ebpf::EventSeverity::Critical => ThreatLevel::Malicious,
+                            },
+                            indicators: ebpf_event.indicators,
+                            confidence: ebpf_event.confidence,
+                            threat_context: None,
+                            evasion_analysis: None,
+                        };
+                        
+                        detection_results.push(detection_result);
+                    }
+                    
+                    Ok(detection_results)
+                }
+                Err(e) => {
+                    eprintln!("eBPF event processing error: {:?}", e);
+                    Ok(Vec::new())
+                }
+            }
+        } else {
+            Ok(Vec::new())
+        }
+    }
+
+    /// Get eBPF detector statistics (Linux only)
+    #[cfg(target_os = "linux")]
+    pub fn get_ebpf_statistics(&self) -> Option<crate::ebpf::EbpfStatistics> {
+        self.ebpf_detector.as_ref().map(|detector| detector.get_statistics())
     }
 
     /// Check for suspicious memory patterns
