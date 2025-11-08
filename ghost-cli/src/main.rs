@@ -44,11 +44,17 @@ fn main() -> Result<()> {
     let mut engine = DetectionEngine::new();
     
     let processes = if let Some(pid_str) = target_pid {
-        let pid: u32 = pid_str.parse().expect("Invalid PID format");
-        process::enumerate_processes()?
+        let pid: u32 = pid_str.parse().map_err(|_| anyhow::anyhow!("Invalid PID format: {}", pid_str))?;
+        let all_processes = process::enumerate_processes()?;
+        let filtered: Vec<_> = all_processes
             .into_iter()
             .filter(|p| p.pid == pid)
-            .collect()
+            .collect();
+        
+        if filtered.is_empty() {
+            println!("Warning: No process found with PID {}", pid);
+        }
+        filtered
     } else {
         process::enumerate_processes()?
     };
