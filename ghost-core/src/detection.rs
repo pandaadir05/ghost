@@ -1,4 +1,4 @@
-use crate::{MemoryProtection, MemoryRegion, ProcessInfo};
+use crate::{MemoryProtection, MemoryRegion, ProcessInfo, ThreadInfo};
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -33,11 +33,12 @@ impl DetectionEngine {
         }
     }
 
-    /// Analyze process for injection indicators
+    /// Analyze process for injection indicators with thread information
     pub fn analyze_process(
         &mut self,
         process: &ProcessInfo,
         memory_regions: &[MemoryRegion],
+        threads: Option<&[ThreadInfo]>,
     ) -> DetectionResult {
         let mut indicators = Vec::new();
         let mut confidence = 0.0;
@@ -88,6 +89,11 @@ impl DetectionEngine {
         
         // Check for unusual memory patterns
         self.check_memory_patterns(memory_regions, &mut indicators, &mut confidence);
+        
+        // Analyze threads if provided
+        if let Some(thread_list) = threads {
+            self.analyze_threads(thread_list, &mut indicators, &mut confidence);
+        }
 
         self.baseline.insert(
             process.pid,
@@ -147,6 +153,42 @@ impl DetectionEngine {
                 *confidence += 0.2;
                 break;
             }
+        }
+    }
+
+    /// Analyze thread patterns for injection indicators
+    fn analyze_threads(
+        &self,
+        threads: &[ThreadInfo],
+        indicators: &mut Vec<String>,
+        confidence: &mut f32,
+    ) {
+        // Check for threads started from unusual locations
+        let suspicious_threads = threads
+            .iter()
+            .filter(|t| {
+                // Look for threads not started from main image
+                t.start_address != 0 && (t.start_address & 0xFFFF_0000) != 0x7FF0_0000
+            })
+            .count();
+
+        if suspicious_threads > 0 {
+            indicators.push(format!(
+                "{} threads with suspicious start addresses",
+                suspicious_threads
+            ));
+            *confidence += 0.4;
+        }
+
+        // Check for abnormal thread creation time patterns
+        let recent_threads = threads
+            .iter()
+            .filter(|t| t.creation_time > 0)
+            .count();
+
+        if recent_threads as f32 / threads.len() as f32 > 0.5 {
+            indicators.push("High ratio of recently created threads".to_string());
+            *confidence += 0.3;
         }
     }
 }
