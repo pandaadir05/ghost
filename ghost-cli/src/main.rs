@@ -62,6 +62,8 @@ fn main() -> Result<()> {
     println!("Scanning {} processes...\n", processes.len());
 
     let mut detections = Vec::new();
+    let mut scanned_count = 0;
+    let mut error_count = 0;
 
     for proc in &processes {
         // Skip known safe system processes for performance
@@ -69,15 +71,29 @@ fn main() -> Result<()> {
             continue;
         }
         
-        if let Ok(regions) = memory::enumerate_memory_regions(proc.pid) {
-            // Get thread information if available
-            let threads = thread::enumerate_threads(proc.pid).ok();
-            let result = engine.analyze_process(proc, &regions, threads.as_deref());
+        scanned_count += 1;
+        
+        match memory::enumerate_memory_regions(proc.pid) {
+            Ok(regions) => {
+                // Get thread information if available
+                let threads = thread::enumerate_threads(proc.pid).ok();
+                let result = engine.analyze_process(proc, &regions, threads.as_deref());
 
-            if result.threat_level != ThreatLevel::Clean {
-                detections.push(result);
+                if result.threat_level != ThreatLevel::Clean {
+                    detections.push(result);
+                }
+            }
+            Err(_) => {
+                error_count += 1;
+                if verbose {
+                    println!("Warning: Could not scan process {} (PID: {})", proc.name, proc.pid);
+                }
             }
         }
+    }
+
+    if verbose && error_count > 0 {
+        println!("Scan completed with {} access errors", error_count);
     }
 
     if detections.is_empty() {
