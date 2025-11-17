@@ -127,11 +127,11 @@ impl DynamicYaraEngine {
             bytes_scanned += region.size;
             
             // Simulate finding suspicious patterns
-            if region.protection.executable && region.protection.writable {
+            if region.protection.is_executable() && region.protection.is_writable() {
                 matches.push(RuleMatch {
                     rule_name: "suspicious_rwx_memory".to_string(),
                     threat_level: ThreatLevel::High,
-                    offset: region.base_address,
+                    offset: region.base_address as u64,
                     length: 1024,
                     metadata: HashMap::new(),
                 });
@@ -145,7 +145,7 @@ impl DynamicYaraEngine {
         Ok(YaraScanResult {
             matches,
             scan_time_ms,
-            bytes_scanned,
+            bytes_scanned: bytes_scanned as u64,
         })
     }
 

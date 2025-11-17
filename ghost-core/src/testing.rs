@@ -721,9 +721,13 @@ impl TestFramework {
     pub fn run_all_tests(&mut self) -> TestRunReport {
         let mut report = TestRunReport::new();
         
-        for (suite_name, test_suite) in &self.test_suites {
-            let suite_results = self.run_test_suite(test_suite);
-            report.add_suite_results(suite_name.clone(), suite_results);
+        let suite_names_and_tests: Vec<(String, TestSuite)> = self.test_suites.iter()
+            .map(|(name, suite)| (name.clone(), suite.clone()))
+            .collect();
+        
+        for (suite_name, test_suite) in suite_names_and_tests {
+            let suite_results = self.run_test_suite(&test_suite);
+            report.add_suite_results(suite_name, suite_results);
         }
 
         report

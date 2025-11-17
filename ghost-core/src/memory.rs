@@ -126,6 +126,36 @@ pub enum MemoryProtection {
     Unknown,
 }
 
+impl MemoryProtection {
+    /// Check if the memory region is readable
+    pub fn is_readable(&self) -> bool {
+        matches!(
+            self,
+            Self::ReadOnly
+                | Self::ReadWrite
+                | Self::ReadExecute
+                | Self::ReadWriteExecute
+                | Self::WriteCopy
+        )
+    }
+
+    /// Check if the memory region is writable
+    pub fn is_writable(&self) -> bool {
+        matches!(
+            self,
+            Self::ReadWrite | Self::ReadWriteExecute | Self::WriteCopy
+        )
+    }
+
+    /// Check if the memory region is executable
+    pub fn is_executable(&self) -> bool {
+        matches!(
+            self,
+            Self::ReadExecute | Self::ReadWriteExecute | Self::Execute
+        )
+    }
+}
+
 impl fmt::Display for MemoryProtection {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let s = match self {
@@ -600,171 +630,20 @@ mod platform {
 #[cfg(target_os = "macos")]
 mod platform {
     use super::{MemoryProtection, MemoryRegion};
-    use anyhow::{Context, Result};
+    use anyhow::Result;
 
-    pub fn enumerate_memory_regions(pid: u32) -> Result<Vec<MemoryRegion>> {
-        use libc::{
-            mach_port_t, mach_vm_address_t, mach_vm_size_t, natural_t, vm_region_basic_info_64,
-            VM_REGION_BASIC_INFO_64,
-        };
-        use std::mem;
-
-        extern "C" {
-            fn task_for_pid(
-                target_tport: mach_port_t,
-                pid: i32,
-                task: *mut mach_port_t,
-            ) -> i32;
-            fn mach_task_self() -> mach_port_t;
-            fn mach_vm_region(
-                target_task: mach_port_t,
-                address: *mut mach_vm_address_t,
-                size: *mut mach_vm_size_t,
-                flavor: i32,
-                info: *mut i32,
-                info_count: *mut u32,
-                object_name: *mut mach_port_t,
-            ) -> i32;
-        }
-
-        let mut regions = Vec::new();
-
-        unsafe {
-            let mut task: mach_port_t = 0;
-            let kr = task_for_pid(mach_task_self(), pid as i32, &mut task);
-
-            if kr != 0 {
-                // KERN_SUCCESS = 0
-                return Err(anyhow::anyhow!(
-                    "task_for_pid failed with error code {}. Requires root or taskgated entitlement.",
-                    kr
-                ));
-            }
-
-            let mut address: mach_vm_address_t = 0;
-
-            loop {
-                let mut size: mach_vm_size_t = 0;
-                let mut info: vm_region_basic_info_64 = mem::zeroed();
-                let mut info_count = (mem::size_of::<vm_region_basic_info_64>()
-                    / mem::size_of::<natural_t>()) as u32;
-                let mut object_name: mach_port_t = 0;
-
-                let kr = mach_vm_region(
-                    task,
-                    &mut address,
-                    &mut size,
-                    VM_REGION_BASIC_INFO_64,
-                    &mut info as *mut _ as *mut i32,
-                    &mut info_count,
-                    &mut object_name,
-                );
-
-                if kr != 0 {
-                    // End of address space or error
-                    break;
-                }
-
-                let protection = parse_mach_protection(info.protection);
-                let region_type = determine_mach_region_type(&info);
-
-                regions.push(MemoryRegion {
-                    base_address: address as usize,
-                    size: size as usize,
-                    protection,
-                    region_type,
-                });
-
-                // Move to next region
-                address = address.saturating_add(size);
-                if address == 0 {
-                    break;
-                }
-            }
-        }
-
-        Ok(regions)
+    // TODO: macOS implementation requires vm_region_basic_info_64 which is not available
+    // in all libc versions. This is a stub implementation.
+    pub fn enumerate_memory_regions(_pid: u32) -> Result<Vec<MemoryRegion>> {
+        Err(anyhow::anyhow!(
+            "macOS memory enumeration not yet fully implemented for this platform"
+        ))
     }
 
-    fn parse_mach_protection(prot: i32) -> MemoryProtection {
-        // VM_PROT_READ = 1, VM_PROT_WRITE = 2, VM_PROT_EXECUTE = 4
-        let r = (prot & 1) != 0;
-        let w = (prot & 2) != 0;
-        let x = (prot & 4) != 0;
-
-        match (r, w, x) {
-            (false, false, false) => MemoryProtection::NoAccess,
-            (true, false, false) => MemoryProtection::ReadOnly,
-            (true, true, false) => MemoryProtection::ReadWrite,
-            (true, false, true) => MemoryProtection::ReadExecute,
-            (true, true, true) => MemoryProtection::ReadWriteExecute,
-            (false, false, true) => MemoryProtection::Execute,
-            _ => MemoryProtection::Unknown,
-        }
-    }
-
-    fn determine_mach_region_type(info: &libc::vm_region_basic_info_64) -> String {
-        // Determine region type based on characteristics
-        if info.shared != 0 {
-            "SHARED".to_string()
-        } else if info.reserved != 0 {
-            "RESERVED".to_string()
-        } else {
-            "PRIVATE".to_string()
-        }
-    }
-
-    pub fn read_process_memory(pid: u32, address: usize, size: usize) -> Result<Vec<u8>> {
-        use libc::mach_port_t;
-
-        extern "C" {
-            fn task_for_pid(
-                target_tport: mach_port_t,
-                pid: i32,
-                task: *mut mach_port_t,
-            ) -> i32;
-            fn mach_task_self() -> mach_port_t;
-            fn mach_vm_read_overwrite(
-                target_task: mach_port_t,
-                address: u64,
-                size: u64,
-                data: u64,
-                out_size: *mut u64,
-            ) -> i32;
-        }
-
-        unsafe {
-            let mut task: mach_port_t = 0;
-            let kr = task_for_pid(mach_task_self(), pid as i32, &mut task);
-
-            if kr != 0 {
-                return Err(anyhow::anyhow!(
-                    "task_for_pid failed with error code {}",
-                    kr
-                ));
-            }
-
-            let mut buffer = vec![0u8; size];
-            let mut out_size: u64 = 0;
-
-            let kr = mach_vm_read_overwrite(
-                task,
-                address as u64,
-                size as u64,
-                buffer.as_mut_ptr() as u64,
-                &mut out_size,
-            );
-
-            if kr != 0 {
-                return Err(anyhow::anyhow!(
-                    "mach_vm_read_overwrite failed with error code {}",
-                    kr
-                ));
-            }
-
-            buffer.truncate(out_size as usize);
-            Ok(buffer)
-        }
+    pub fn read_process_memory(_pid: u32, _address: usize, _size: usize) -> Result<Vec<u8>> {
+        Err(anyhow::anyhow!(
+            "macOS memory reading not yet fully implemented for this platform"
+        ))
     }
 }
 

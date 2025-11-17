@@ -63,7 +63,7 @@ impl HollowingDetector {
         memory_regions: &[MemoryRegion],
     ) -> Result<Option<HollowingDetection>> {
         let mut indicators = Vec::new();
-        let mut confidence = 0.0;
+        let mut confidence: f32 = 0.0;
 
         // Check for main image unmapping
         if let Some(indicator) = self.check_main_image_unmapping(process, memory_regions) {

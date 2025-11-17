@@ -1,4 +1,5 @@
 use crate::{GhostError, ProcessInfo, Result};
+use chrono::Timelike;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -132,7 +133,7 @@ impl AnomalyDetector {
         let entropy_score = self.calculate_entropy_score(memory_regions);
 
         // Time-based features
-        let creation_time_hours = chrono::Utc::now().hour() as f64;
+        let creation_time_hours = chrono::Utc::now().time().hour() as f64;
 
         // Parent-child relationship analysis
         let parent_child_ratio = if process.ppid == 0 {

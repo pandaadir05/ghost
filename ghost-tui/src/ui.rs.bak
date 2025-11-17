@@ -30,7 +30,7 @@ mod colors {
 
 use colors::*;
 
-pub fn draw<B: Backend>(f: &mut Frame, app: &App) {
+pub fn draw<B: Backend>(f: &mut Frame<B>, app: &App) {
     let size = f.size();
 
     // Create main layout
@@ -59,7 +59,7 @@ pub fn draw<B: Backend>(f: &mut Frame, app: &App) {
     draw_footer(f, chunks[2], app);
 }
 
-fn draw_header<B: Backend>(f: &mut Frame, area: Rect, app: &App) {
+fn draw_header<B: Backend>(f: &mut Frame<B>, area: Rect, app: &App) {
     let titles = app.get_tab_titles();
     let tabs = Tabs::new(titles)
         .block(
@@ -81,7 +81,7 @@ fn draw_header<B: Backend>(f: &mut Frame, area: Rect, app: &App) {
     f.render_widget(tabs, area);
 }
 
-fn draw_footer<B: Backend>(f: &mut Frame, area: Rect, app: &App) {
+fn draw_footer<B: Backend>(f: &mut Frame<B>, area: Rect, app: &App) {
     let help_text = match app.current_tab {
         TabIndex::Overview => "Up/Down: Navigate | Tab: Switch tabs | R: Refresh | C: Clear | Q: Quit",
         TabIndex::Processes => "Up/Down: Select process | Enter: View details | Tab: Switch tabs | Q: Quit",
@@ -102,7 +102,7 @@ fn draw_footer<B: Backend>(f: &mut Frame, area: Rect, app: &App) {
     f.render_widget(footer, area);
 }
 
-fn draw_overview<B: Backend>(f: &mut Frame, area: Rect, app: &App) {
+fn draw_overview<B: Backend>(f: &mut Frame<B>, area: Rect, app: &App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -122,7 +122,7 @@ fn draw_overview<B: Backend>(f: &mut Frame, area: Rect, app: &App) {
     draw_recent_detections(f, chunks[2], app);
 }
 
-fn draw_stats_panel<B: Backend>(f: &mut Frame, area: Rect, app: &App) {
+fn draw_stats_panel<B: Backend>(f: &mut Frame<B>, area: Rect, app: &App) {
     let stats_chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
@@ -194,7 +194,7 @@ fn draw_stats_panel<B: Backend>(f: &mut Frame, area: Rect, app: &App) {
     f.render_widget(perf_gauge, stats_chunks[3]);
 }
 
-fn draw_threat_gauge<B: Backend>(f: &mut Frame, area: Rect, app: &App) {
+fn draw_threat_gauge<B: Backend>(f: &mut Frame<B>, area: Rect, app: &App) {
     let threat_level = if app.stats.malicious_processes > 0 {
         100
     } else if app.stats.suspicious_processes > 0 {
@@ -229,7 +229,7 @@ fn draw_threat_gauge<B: Backend>(f: &mut Frame, area: Rect, app: &App) {
     f.render_widget(threat_gauge, area);
 }
 
-fn draw_recent_detections<B: Backend>(f: &mut Frame, area: Rect, app: &App) {
+fn draw_recent_detections<B: Backend>(f: &mut Frame<B>, area: Rect, app: &App) {
     let items: Vec<ListItem> = app
         .detections
         .iter()
@@ -267,7 +267,7 @@ fn draw_recent_detections<B: Backend>(f: &mut Frame, area: Rect, app: &App) {
     f.render_widget(list, area);
 }
 
-fn draw_processes<B: Backend>(f: &mut Frame, area: Rect, app: &App) {
+fn draw_processes<B: Backend>(f: &mut Frame<B>, area: Rect, app: &App) {
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(70), Constraint::Percentage(30)])
@@ -323,7 +323,7 @@ fn draw_processes<B: Backend>(f: &mut Frame, area: Rect, app: &App) {
     draw_process_details(f, chunks[1], app);
 }
 
-fn draw_process_details<B: Backend>(f: &mut Frame, area: Rect, app: &App) {
+fn draw_process_details<B: Backend>(f: &mut Frame<B>, area: Rect, app: &App) {
     let details = if let Some(ref process) = app.selected_process {
         format!(
             "PID: {}\nPPID: {}\nName: {}\nPath: {}\nThreads: {}",
@@ -350,7 +350,7 @@ fn draw_process_details<B: Backend>(f: &mut Frame, area: Rect, app: &App) {
     f.render_widget(paragraph, area);
 }
 
-fn draw_detections<B: Backend>(f: &mut Frame, area: Rect, app: &App) {
+fn draw_detections<B: Backend>(f: &mut Frame<B>, area: Rect, app: &App) {
     let items: Vec<ListItem> = app
         .detections
         .iter()
@@ -403,7 +403,7 @@ fn draw_detections<B: Backend>(f: &mut Frame, area: Rect, app: &App) {
     f.render_stateful_widget(list, area, &mut state);
 }
 
-fn draw_memory<B: Backend>(f: &mut Frame, area: Rect, app: &App) {
+fn draw_memory<B: Backend>(f: &mut Frame<B>, area: Rect, app: &App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Length(8), Constraint::Min(0)])
@@ -442,7 +442,7 @@ fn draw_memory<B: Backend>(f: &mut Frame, area: Rect, app: &App) {
     f.render_widget(memory_info, chunks[1]);
 }
 
-fn draw_logs<B: Backend>(f: &mut Frame, area: Rect, app: &App) {
+fn draw_logs<B: Backend>(f: &mut Frame<B>, area: Rect, app: &App) {
     let items: Vec<ListItem> = app
         .logs
         .iter()

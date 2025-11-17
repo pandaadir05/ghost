@@ -239,7 +239,7 @@ pub struct EscalationPolicy {
 pub struct EscalationStep {
     pub level: u32,
     pub delay: Duration,
-    pub notification_channels: Vec<NotificationChannel>,
+    pub notification_channel_names: Vec<String>,
     pub actions: Vec<EscalationAction>,
 }
 
@@ -692,10 +692,13 @@ impl AlertManager {
     }
 
     pub async fn evaluate_alerts(&mut self, event: &StreamingEvent) -> Result<(), Box<dyn std::error::Error>> {
-        for rule in &self.alert_rules {
-            if rule.enabled && self.evaluate_rule_conditions(rule, event) {
-                self.trigger_alert(rule, event).await?;
-            }
+        let triggered_rules: Vec<AlertRule> = self.alert_rules.iter()
+            .filter(|rule| rule.enabled && self.evaluate_rule_conditions(rule, event))
+            .cloned()
+            .collect();
+        
+        for rule in triggered_rules {
+            self.trigger_alert(&rule, event).await?;
         }
         Ok(())
     }

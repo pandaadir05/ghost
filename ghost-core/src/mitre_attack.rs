@@ -123,7 +123,7 @@ pub enum DifficultyLevel {
     VeryHigh,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum KillChainPhase {
     Reconnaissance,
     WeaponizationDevelopment,
@@ -530,7 +530,7 @@ impl MitreAttackEngine {
 
         // Check for Process Injection indicators
         let rwx_regions = memory_regions.iter()
-            .filter(|r| r.protection.readable && r.protection.writable && r.protection.executable)
+            .filter(|r| r.protection.is_readable() && r.protection.is_writable() && r.protection.is_executable())
             .count();
 
         if rwx_regions > 0 {

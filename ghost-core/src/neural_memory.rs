@@ -179,7 +179,7 @@ impl NeuralMemoryAnalyzer {
         
         // Protection features
         let rwx_count = memory_regions.iter()
-            .filter(|r| r.protection.readable && r.protection.writable && r.protection.executable)
+            .filter(|r| r.protection.is_readable() && r.protection.is_writable() && r.protection.is_executable())
             .count() as f32;
         features.push(rwx_count);
         

@@ -112,7 +112,7 @@ impl CloudMLEngine {
         // Simulate ML inference
         let start_time = SystemTime::now();
         
-        let threat_level = if memory_regions.iter().any(|r| r.protection.executable && r.protection.writable) {
+        let threat_level = if memory_regions.iter().any(|r| r.protection.is_executable() && r.protection.is_writable()) {
             ThreatSeverity::High
         } else if memory_regions.len() > 50 {
             ThreatSeverity::Medium

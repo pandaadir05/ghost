@@ -6,7 +6,7 @@
 
 use crate::{
     detect_hook_injection, AnomalyDetector, DetectionConfig, EvasionDetector, EvasionResult,
-    GhostError, MemoryProtection, MemoryRegion, MitreAnalysisResult, MitreAttackEngine,
+    GhostError, HollowingDetector, MemoryProtection, MemoryRegion, MitreAnalysisResult, MitreAttackEngine,
     ProcessInfo, ShellcodeDetector, ThreadInfo, ThreatContext, ThreatIntelligence,
 };
 #[cfg(target_os = "linux")]
@@ -246,12 +246,12 @@ impl DetectionEngine {
                     indicators.push(format!("Outlier: {}", outlier));
                 }
                 
-                confidence += anomaly_score.overall_score * anomaly_score.confidence;
+                confidence += (anomaly_score.overall_score * anomaly_score.confidence) as f32;
             }
         }
 
         // Advanced evasion detection
-        let evasion_result = self.evasion_detector.analyze_evasion(process, memory_regions, threads);
+        let evasion_result = self.evasion_detector.analyze_evasion(process, memory_regions, threads.unwrap_or(&[]));
         if evasion_result.confidence > 0.3 {
             for technique in &evasion_result.evasion_techniques {
                 indicators.push(format!(
@@ -340,7 +340,7 @@ impl DetectionEngine {
         threads: &[ThreadInfo],
     ) -> DetectionResult {
         // Perform standard detection
-        let mut detection_result = self.analyze_process(process, memory_regions, threads);
+        let mut detection_result = self.analyze_process(process, memory_regions, Some(threads));
         
         // Add evasion analysis
         let evasion_result = self.evasion_detector.analyze_evasion(process, memory_regions, threads);

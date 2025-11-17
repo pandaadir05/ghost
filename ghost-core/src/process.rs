@@ -202,109 +202,14 @@ mod platform {
 #[cfg(target_os = "macos")]
 mod platform {
     use super::ProcessInfo;
-    use anyhow::{Context, Result};
+    use anyhow::Result;
 
+    // TODO: macOS implementation requires kinfo_proc which is not available
+    // in all libc versions. This is a stub implementation.
     pub fn enumerate_processes() -> Result<Vec<ProcessInfo>> {
-        use libc::{c_int, c_void, size_t, sysctl, CTL_KERN, KERN_PROC, KERN_PROC_ALL};
-        use std::mem;
-        use std::ptr;
-
-        let mut processes = Vec::new();
-
-        unsafe {
-            // First, get the size needed for the buffer
-            let mut mib: [c_int; 4] = [CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0];
-            let mut size: size_t = 0;
-
-            let result = sysctl(
-                mib.as_mut_ptr(),
-                3,
-                ptr::null_mut(),
-                &mut size,
-                ptr::null_mut(),
-                0,
-            );
-
-            if result != 0 {
-                return Err(anyhow::anyhow!(
-                    "Failed to get process list size: {}",
-                    std::io::Error::last_os_error()
-                ));
-            }
-
-            // Allocate buffer with some extra space
-            let count = size / mem::size_of::<libc::kinfo_proc>();
-            let mut buffer: Vec<libc::kinfo_proc> = Vec::with_capacity(count + 16);
-            buffer.resize_with(count + 16, || mem::zeroed());
-
-            let mut actual_size = buffer.len() * mem::size_of::<libc::kinfo_proc>();
-
-            let result = sysctl(
-                mib.as_mut_ptr(),
-                3,
-                buffer.as_mut_ptr() as *mut c_void,
-                &mut actual_size,
-                ptr::null_mut(),
-                0,
-            );
-
-            if result != 0 {
-                return Err(anyhow::anyhow!(
-                    "Failed to get process list: {}",
-                    std::io::Error::last_os_error()
-                ));
-            }
-
-            let actual_count = actual_size / mem::size_of::<libc::kinfo_proc>();
-
-            for i in 0..actual_count {
-                let proc_info = &buffer[i];
-                let pid = proc_info.kp_proc.p_pid as u32;
-                let ppid = proc_info.kp_eproc.e_ppid as u32;
-
-                // Get process name from comm field
-                let comm = &proc_info.kp_proc.p_comm;
-                let name = std::ffi::CStr::from_ptr(comm.as_ptr())
-                    .to_string_lossy()
-                    .into_owned();
-
-                // Get executable path using proc_pidpath
-                let path = get_process_path(pid as i32);
-
-                processes.push(ProcessInfo {
-                    pid,
-                    ppid,
-                    name,
-                    path,
-                    thread_count: 1, // Would need task_info for accurate count
-                });
-            }
-        }
-
-        Ok(processes)
-    }
-
-    fn get_process_path(pid: i32) -> Option<String> {
-        use std::ffi::CStr;
-        use std::os::raw::c_char;
-
-        extern "C" {
-            fn proc_pidpath(pid: i32, buffer: *mut c_char, buffersize: u32) -> i32;
-        }
-
-        unsafe {
-            let mut buffer = [0i8; libc::PATH_MAX as usize];
-            let result = proc_pidpath(pid, buffer.as_mut_ptr(), libc::PATH_MAX as u32);
-
-            if result > 0 {
-                CStr::from_ptr(buffer.as_ptr())
-                    .to_str()
-                    .ok()
-                    .map(|s| s.to_string())
-            } else {
-                None
-            }
-        }
+        Err(anyhow::anyhow!(
+            "macOS process enumeration not yet fully implemented for this platform"
+        ))
     }
 }
 
