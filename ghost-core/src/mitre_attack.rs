@@ -1,7 +1,7 @@
-use crate::{ProcessInfo, MemoryRegion, ThreadInfo, GhostError};
+use crate::{GhostError, MemoryRegion, ProcessInfo, ThreadInfo};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::time::{SystemTime, Duration};
+use std::time::{Duration, SystemTime};
 
 /// MITRE ATT&CK Framework Integration Engine
 /// Provides comprehensive technique mapping, threat actor profiling, and tactical analysis
@@ -74,7 +74,7 @@ pub enum Platform {
     Linux,
     MacOS,
     Android,
-    iOS,
+    IOS,
     Cloud,
     Network,
     Container,
@@ -344,7 +344,7 @@ pub enum EvidenceType {
     NetworkActivity,
     FileSystem,
     Registry,
-    API_Calls,
+    ApiCalls,
     Timing,
 }
 
@@ -370,114 +370,125 @@ impl MitreAttackEngine {
 
     fn initialize_techniques(&mut self) -> Result<(), GhostError> {
         // Process Injection (T1055)
-        self.techniques.insert("T1055".to_string(), AttackTechnique {
-            id: "T1055".to_string(),
-            name: "Process Injection".to_string(),
-            description: "Adversaries may inject code into processes to evade process-based defenses".to_string(),
-            tactics: vec!["TA0004".to_string(), "TA0005".to_string()], // Defense Evasion, Privilege Escalation
-            platforms: vec![Platform::Windows, Platform::Linux, Platform::MacOS],
-            data_sources: vec![
-                DataSource {
+        self.techniques.insert(
+            "T1055".to_string(),
+            AttackTechnique {
+                id: "T1055".to_string(),
+                name: "Process Injection".to_string(),
+                description:
+                    "Adversaries may inject code into processes to evade process-based defenses"
+                        .to_string(),
+                tactics: vec!["TA0004".to_string(), "TA0005".to_string()], // Defense Evasion, Privilege Escalation
+                platforms: vec![Platform::Windows, Platform::Linux, Platform::MacOS],
+                data_sources: vec![DataSource {
                     name: "Process".to_string(),
                     data_component: "Process Access".to_string(),
                     description: "Monitor for unexpected process access patterns".to_string(),
-                },
-            ],
-            detection_methods: vec![
-                DetectionMethod {
+                }],
+                detection_methods: vec![DetectionMethod {
                     method_type: DetectionType::BehavioralAnalysis,
                     description: "Monitor for unusual cross-process activity".to_string(),
                     effectiveness: 0.85,
                     false_positive_rate: 0.1,
-                },
-            ],
-            mitigations: vec![
-                Mitigation {
+                }],
+                mitigations: vec![Mitigation {
                     id: "M1040".to_string(),
                     name: "Behavior Prevention on Endpoint".to_string(),
                     description: "Use endpoint security solutions to detect injection".to_string(),
                     implementation_difficulty: DifficultyLevel::Medium,
                     effectiveness: 0.8,
-                },
-            ],
-            sub_techniques: vec!["T1055.001".to_string(), "T1055.002".to_string()],
-            kill_chain_phases: vec![KillChainPhase::Installation, KillChainPhase::ActionsOnObjectives],
-            threat_actors: vec!["APT1".to_string(), "APT29".to_string()],
-            references: vec![
-                Reference {
+                }],
+                sub_techniques: vec!["T1055.001".to_string(), "T1055.002".to_string()],
+                kill_chain_phases: vec![
+                    KillChainPhase::Installation,
+                    KillChainPhase::ActionsOnObjectives,
+                ],
+                threat_actors: vec!["APT1".to_string(), "APT29".to_string()],
+                references: vec![Reference {
                     source: "MITRE ATT&CK".to_string(),
                     url: "https://attack.mitre.org/techniques/T1055/".to_string(),
                     description: "Process Injection".to_string(),
-                },
-            ],
-        });
+                }],
+            },
+        );
 
         // Process Hollowing (T1055.012)
-        self.techniques.insert("T1055.012".to_string(), AttackTechnique {
-            id: "T1055.012".to_string(),
-            name: "Process Hollowing".to_string(),
-            description: "Adversaries may inject malicious code into suspended and hollowed processes".to_string(),
-            tactics: vec!["TA0004".to_string(), "TA0005".to_string()],
-            platforms: vec![Platform::Windows],
-            data_sources: vec![
-                DataSource {
+        self.techniques.insert(
+            "T1055.012".to_string(),
+            AttackTechnique {
+                id: "T1055.012".to_string(),
+                name: "Process Hollowing".to_string(),
+                description:
+                    "Adversaries may inject malicious code into suspended and hollowed processes"
+                        .to_string(),
+                tactics: vec!["TA0004".to_string(), "TA0005".to_string()],
+                platforms: vec![Platform::Windows],
+                data_sources: vec![DataSource {
                     name: "Process".to_string(),
                     data_component: "Process Creation".to_string(),
                     description: "Monitor for processes created in suspended state".to_string(),
-                },
-            ],
-            detection_methods: vec![
-                DetectionMethod {
+                }],
+                detection_methods: vec![DetectionMethod {
                     method_type: DetectionType::EndpointDetection,
                     description: "Detect hollowing through memory analysis".to_string(),
                     effectiveness: 0.9,
                     false_positive_rate: 0.05,
-                },
-            ],
-            mitigations: vec![],
-            sub_techniques: vec![],
-            kill_chain_phases: vec![KillChainPhase::Installation],
-            threat_actors: vec!["APT29".to_string(), "Lazarus Group".to_string()],
-            references: vec![],
-        });
+                }],
+                mitigations: vec![],
+                sub_techniques: vec![],
+                kill_chain_phases: vec![KillChainPhase::Installation],
+                threat_actors: vec!["APT29".to_string(), "Lazarus Group".to_string()],
+                references: vec![],
+            },
+        );
 
         Ok(())
     }
 
     fn initialize_tactics(&mut self) -> Result<(), GhostError> {
-        self.tactics.insert("TA0004".to_string(), AttackTactic {
-            id: "TA0004".to_string(),
-            name: "Defense Evasion".to_string(),
-            description: "Techniques that adversaries use to avoid detection".to_string(),
-            techniques: vec!["T1055".to_string()],
-            matrix_position: 4,
-        });
+        self.tactics.insert(
+            "TA0004".to_string(),
+            AttackTactic {
+                id: "TA0004".to_string(),
+                name: "Defense Evasion".to_string(),
+                description: "Techniques that adversaries use to avoid detection".to_string(),
+                techniques: vec!["T1055".to_string()],
+                matrix_position: 4,
+            },
+        );
 
-        self.tactics.insert("TA0005".to_string(), AttackTactic {
-            id: "TA0005".to_string(),
-            name: "Privilege Escalation".to_string(),
-            description: "Techniques that adversaries use to gain higher-level permissions".to_string(),
-            techniques: vec!["T1055".to_string()],
-            matrix_position: 5,
-        });
+        self.tactics.insert(
+            "TA0005".to_string(),
+            AttackTactic {
+                id: "TA0005".to_string(),
+                name: "Privilege Escalation".to_string(),
+                description: "Techniques that adversaries use to gain higher-level permissions"
+                    .to_string(),
+                techniques: vec!["T1055".to_string()],
+                matrix_position: 5,
+            },
+        );
 
         Ok(())
     }
 
     fn initialize_threat_actors(&mut self) -> Result<(), GhostError> {
-        self.threat_actors.insert("APT29".to_string(), ThreatActor {
-            id: "G0016".to_string(),
-            name: "APT29".to_string(),
-            aliases: vec!["Cozy Bear".to_string(), "The Dukes".to_string()],
-            description: "Russian state-sponsored threat group".to_string(),
-            country: Some("Russia".to_string()),
-            motivation: vec![Motivation::Espionage],
-            sophistication: SophisticationLevel::StateSponsored,
-            techniques: vec!["T1055".to_string(), "T1055.012".to_string()],
-            campaigns: vec!["Operation Ghost".to_string()],
-            first_seen: SystemTime::now() - Duration::from_secs(365 * 24 * 3600 * 10), // 10 years ago
-            last_activity: SystemTime::now() - Duration::from_secs(30 * 24 * 3600), // 30 days ago
-        });
+        self.threat_actors.insert(
+            "APT29".to_string(),
+            ThreatActor {
+                id: "G0016".to_string(),
+                name: "APT29".to_string(),
+                aliases: vec!["Cozy Bear".to_string(), "The Dukes".to_string()],
+                description: "Russian state-sponsored threat group".to_string(),
+                country: Some("Russia".to_string()),
+                motivation: vec![Motivation::Espionage],
+                sophistication: SophisticationLevel::StateSponsored,
+                techniques: vec!["T1055".to_string(), "T1055.012".to_string()],
+                campaigns: vec!["Operation Ghost".to_string()],
+                first_seen: SystemTime::now() - Duration::from_secs(365 * 24 * 3600 * 10), // 10 years ago
+                last_activity: SystemTime::now() - Duration::from_secs(30 * 24 * 3600), // 30 days ago
+            },
+        );
 
         Ok(())
     }
@@ -501,7 +512,9 @@ impl MitreAttackEngine {
         memory_regions: &[MemoryRegion],
         threads: &[ThreadInfo],
     ) -> Result<MitreAnalysisResult, GhostError> {
-        let detected_techniques = self.detect_techniques(process, memory_regions, threads).await?;
+        let detected_techniques = self
+            .detect_techniques(process, memory_regions, threads)
+            .await?;
         let tactics_coverage = self.analyze_tactics_coverage(&detected_techniques)?;
         let threat_actor_matches = self.match_threat_actors(&detected_techniques)?;
         let campaign_indicators = self.analyze_campaign_indicators(&detected_techniques)?;
@@ -529,8 +542,13 @@ impl MitreAttackEngine {
         let mut detected = Vec::new();
 
         // Check for Process Injection indicators
-        let rwx_regions = memory_regions.iter()
-            .filter(|r| r.protection.is_readable() && r.protection.is_writable() && r.protection.is_executable())
+        let rwx_regions = memory_regions
+            .iter()
+            .filter(|r| {
+                r.protection.is_readable()
+                    && r.protection.is_writable()
+                    && r.protection.is_executable()
+            })
             .count();
 
         if rwx_regions > 0 {
@@ -538,14 +556,12 @@ impl MitreAttackEngine {
                 detected.push(DetectedTechnique {
                     technique: technique.clone(),
                     confidence: 0.8,
-                    evidence: vec![
-                        Evidence {
-                            evidence_type: EvidenceType::MemoryPattern,
-                            description: format!("Found {} RWX memory regions", rwx_regions),
-                            confidence: 0.9,
-                            source: "Memory Analysis".to_string(),
-                        },
-                    ],
+                    evidence: vec![Evidence {
+                        evidence_type: EvidenceType::MemoryPattern,
+                        description: format!("Found {} RWX memory regions", rwx_regions),
+                        confidence: 0.9,
+                        source: "Memory Analysis".to_string(),
+                    }],
                     sub_technique_id: None,
                     detection_timestamp: SystemTime::now(),
                 });
@@ -558,14 +574,13 @@ impl MitreAttackEngine {
                 detected.push(DetectedTechnique {
                     technique: technique.clone(),
                     confidence: 0.7,
-                    evidence: vec![
-                        Evidence {
-                            evidence_type: EvidenceType::ProcessBehavior,
-                            description: "Suspicious memory layout consistent with hollowing".to_string(),
-                            confidence: 0.7,
-                            source: "Process Analysis".to_string(),
-                        },
-                    ],
+                    evidence: vec![Evidence {
+                        evidence_type: EvidenceType::ProcessBehavior,
+                        description: "Suspicious memory layout consistent with hollowing"
+                            .to_string(),
+                        confidence: 0.7,
+                        source: "Process Analysis".to_string(),
+                    }],
                     sub_technique_id: Some("T1055.012".to_string()),
                     detection_timestamp: SystemTime::now(),
                 });
@@ -575,14 +590,18 @@ impl MitreAttackEngine {
         Ok(detected)
     }
 
-    fn analyze_tactics_coverage(&self, detected_techniques: &[DetectedTechnique]) -> Result<Vec<TacticCoverage>, GhostError> {
+    fn analyze_tactics_coverage(
+        &self,
+        detected_techniques: &[DetectedTechnique],
+    ) -> Result<Vec<TacticCoverage>, GhostError> {
         let mut coverage = Vec::new();
-        
+
         for tactic in self.tactics.values() {
-            let techniques_detected = detected_techniques.iter()
+            let techniques_detected = detected_techniques
+                .iter()
                 .filter(|dt| dt.technique.tactics.contains(&tactic.id))
                 .count();
-            
+
             let total_techniques = tactic.techniques.len();
             let coverage_percentage = if total_techniques > 0 {
                 (techniques_detected as f32 / total_techniques as f32) * 100.0
@@ -601,18 +620,23 @@ impl MitreAttackEngine {
         Ok(coverage)
     }
 
-    fn match_threat_actors(&self, detected_techniques: &[DetectedTechnique]) -> Result<Vec<ThreatActorMatch>, GhostError> {
+    fn match_threat_actors(
+        &self,
+        detected_techniques: &[DetectedTechnique],
+    ) -> Result<Vec<ThreatActorMatch>, GhostError> {
         let mut matches = Vec::new();
 
         for actor in self.threat_actors.values() {
-            let matching_techniques: Vec<String> = detected_techniques.iter()
+            let matching_techniques: Vec<String> = detected_techniques
+                .iter()
                 .filter(|dt| actor.techniques.contains(&dt.technique.id))
                 .map(|dt| dt.technique.id.clone())
                 .collect();
 
             if !matching_techniques.is_empty() {
-                let match_confidence = matching_techniques.len() as f32 / actor.techniques.len() as f32;
-                
+                let match_confidence =
+                    matching_techniques.len() as f32 / actor.techniques.len() as f32;
+
                 matches.push(ThreatActorMatch {
                     threat_actor: actor.clone(),
                     match_confidence,
@@ -625,13 +649,19 @@ impl MitreAttackEngine {
         Ok(matches)
     }
 
-    fn analyze_campaign_indicators(&self, _detected_techniques: &[DetectedTechnique]) -> Result<Vec<CampaignIndicator>, GhostError> {
+    fn analyze_campaign_indicators(
+        &self,
+        _detected_techniques: &[DetectedTechnique],
+    ) -> Result<Vec<CampaignIndicator>, GhostError> {
         Ok(Vec::new()) // Simplified implementation
     }
 
-    fn analyze_kill_chain(&self, detected_techniques: &[DetectedTechnique]) -> Result<KillChainAnalysis, GhostError> {
+    fn analyze_kill_chain(
+        &self,
+        detected_techniques: &[DetectedTechnique],
+    ) -> Result<KillChainAnalysis, GhostError> {
         let mut completed_phases = Vec::new();
-        
+
         for technique in detected_techniques {
             for phase in &technique.technique.kill_chain_phases {
                 if !completed_phases.contains(phase) {
@@ -651,16 +681,23 @@ impl MitreAttackEngine {
         })
     }
 
-    fn assess_risk(&self, detected_techniques: &[DetectedTechnique]) -> Result<RiskAssessment, GhostError> {
+    fn assess_risk(
+        &self,
+        detected_techniques: &[DetectedTechnique],
+    ) -> Result<RiskAssessment, GhostError> {
         let technique_count = detected_techniques.len() as f32;
         let avg_confidence = if !detected_techniques.is_empty() {
-            detected_techniques.iter().map(|dt| dt.confidence).sum::<f32>() / technique_count
+            detected_techniques
+                .iter()
+                .map(|dt| dt.confidence)
+                .sum::<f32>()
+                / technique_count
         } else {
             0.0
         };
 
         let overall_risk_score = (technique_count * 0.3 + avg_confidence * 0.7).min(1.0);
-        
+
         let urgency_level = if overall_risk_score > 0.8 {
             UrgencyLevel::Critical
         } else if overall_risk_score > 0.6 {
@@ -676,17 +713,18 @@ impl MitreAttackEngine {
             attack_likelihood: avg_confidence,
             potential_impact: 0.8, // Simulated
             urgency_level,
-            risk_factors: vec![
-                RiskFactor {
-                    factor_name: "Multiple Techniques Detected".to_string(),
-                    risk_contribution: 0.6,
-                    description: "Multiple attack techniques increase overall risk".to_string(),
-                },
-            ],
+            risk_factors: vec![RiskFactor {
+                factor_name: "Multiple Techniques Detected".to_string(),
+                risk_contribution: 0.6,
+                description: "Multiple attack techniques increase overall risk".to_string(),
+            }],
         })
     }
 
-    fn recommend_mitigations(&self, detected_techniques: &[DetectedTechnique]) -> Result<Vec<MitigationRecommendation>, GhostError> {
+    fn recommend_mitigations(
+        &self,
+        detected_techniques: &[DetectedTechnique],
+    ) -> Result<Vec<MitigationRecommendation>, GhostError> {
         let mut recommendations = Vec::new();
 
         for technique in detected_techniques {
@@ -709,7 +747,7 @@ impl MitreAttackEngine {
         // Simulate framework update
         self.last_update = SystemTime::now();
         self.matrix_version = "13.1".to_string();
-        
+
         // Return number of updated techniques
         Ok(self.techniques.len())
     }
@@ -719,6 +757,10 @@ impl MitreAttackEngine {
     }
 
     pub fn get_framework_stats(&self) -> (usize, usize, usize) {
-        (self.techniques.len(), self.tactics.len(), self.threat_actors.len())
+        (
+            self.techniques.len(),
+            self.tactics.len(),
+            self.threat_actors.len(),
+        )
     }
 }

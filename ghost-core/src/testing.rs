@@ -1,9 +1,9 @@
+use crate::{
+    DetectionEngine, DetectionResult, MemoryProtection, MemoryRegion, ProcessInfo, ThreadInfo,
+    ThreatLevel,
+};
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
-use crate::{
-    DetectionEngine, DetectionResult, ThreatLevel, ProcessInfo, MemoryRegion, 
-    ThreadInfo, MemoryProtection, EvasionResult, ThreatContext
-};
 
 /// Comprehensive Testing Framework for Ghost Detection Engine
 /// Provides unit tests, integration tests, and performance benchmarks
@@ -189,10 +189,10 @@ pub struct ProcessAnalysisBenchmark {
 
 #[derive(Debug, Clone)]
 pub enum ComplexityLevel {
-    Simple,     // Basic process with minimal memory regions
-    Moderate,   // Standard process with normal memory layout
-    Complex,    // Process with many threads and memory regions
-    Extreme,    // Heavily loaded process with maximum complexity
+    Simple,   // Basic process with minimal memory regions
+    Moderate, // Standard process with normal memory layout
+    Complex,  // Process with many threads and memory regions
+    Extreme,  // Heavily loaded process with maximum complexity
 }
 
 #[derive(Debug, Clone)]
@@ -205,10 +205,10 @@ pub struct MemoryScanningBenchmark {
 #[derive(Debug, Clone)]
 pub enum ScanAlgorithm {
     Linear,
-    Boyer_Moore,
-    Knuth_Morris_Pratt,
-    Aho_Corasick,
-    SIMD_Optimized,
+    BoyerMoore,
+    KnuthMorrisPratt,
+    AhoCorasick,
+    SimdOptimized,
 }
 
 #[derive(Debug, Clone)]
@@ -234,9 +234,9 @@ pub struct SystemScanBenchmark {
 
 #[derive(Debug, Clone)]
 pub enum ScanDepth {
-    Surface,     // Basic process enumeration
-    Standard,    // Process + memory analysis
-    Deep,        // Full analysis including threads
+    Surface,       // Basic process enumeration
+    Standard,      // Process + memory analysis
+    Deep,          // Full analysis including threads
     Comprehensive, // All detection modules enabled
 }
 
@@ -367,6 +367,12 @@ pub struct ValidationDetails {
     pub false_negative_rate: f32,
 }
 
+impl Default for TestFramework {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TestFramework {
     pub fn new() -> Self {
         Self {
@@ -404,24 +410,20 @@ impl TestFramework {
                     thread_count: 1,
                     suspicious_indicators: Vec::new(),
                 },
-                memory_data: vec![
-                    MemoryTestData {
-                        base_address: 0x400000,
-                        size: 0x10000,
-                        protection: MemoryProtection::ReadExecute,
-                        contains_shellcode: false,
-                        shellcode_pattern: None,
-                    }
-                ],
-                thread_data: vec![
-                    ThreadTestData {
-                        tid: 5678,
-                        entry_point: 0x401000,
-                        stack_base: 0x500000,
-                        stack_size: 0x10000,
-                        is_suspicious: false,
-                    }
-                ],
+                memory_data: vec![MemoryTestData {
+                    base_address: 0x400000,
+                    size: 0x10000,
+                    protection: MemoryProtection::ReadExecute,
+                    contains_shellcode: false,
+                    shellcode_pattern: None,
+                }],
+                thread_data: vec![ThreadTestData {
+                    tid: 5678,
+                    entry_point: 0x401000,
+                    stack_base: 0x500000,
+                    stack_size: 0x10000,
+                    is_suspicious: false,
+                }],
                 injection_type: None,
             }),
             expected_result: ExpectedResult::ThreatLevel(ThreatLevel::Clean),
@@ -444,29 +446,29 @@ impl TestFramework {
                         "Suspicious API calls".to_string(),
                     ],
                 },
-                memory_data: vec![
-                    MemoryTestData {
-                        base_address: 0x200000,
-                        size: 0x1000,
-                        protection: MemoryProtection::ReadWriteExecute,
-                        contains_shellcode: true,
-                        shellcode_pattern: Some(vec![0x90, 0x90, 0xEB, 0xFE]), // NOP NOP JMP -2
-                    }
-                ],
-                thread_data: vec![
-                    ThreadTestData {
-                        tid: 1111,
-                        entry_point: 0x200000,
-                        stack_base: 0x600000,
-                        stack_size: 0x10000,
-                        is_suspicious: true,
-                    }
-                ],
+                memory_data: vec![MemoryTestData {
+                    base_address: 0x200000,
+                    size: 0x1000,
+                    protection: MemoryProtection::ReadWriteExecute,
+                    contains_shellcode: true,
+                    shellcode_pattern: Some(vec![0x90, 0x90, 0xEB, 0xFE]), // NOP NOP JMP -2
+                }],
+                thread_data: vec![ThreadTestData {
+                    tid: 1111,
+                    entry_point: 0x200000,
+                    stack_base: 0x600000,
+                    stack_size: 0x10000,
+                    is_suspicious: true,
+                }],
                 injection_type: Some(InjectionTestType::ShellcodeInjection),
             }),
             expected_result: ExpectedResult::ThreatLevel(ThreatLevel::Malicious),
             timeout: Duration::from_secs(10),
-            tags: vec!["unit".to_string(), "detection".to_string(), "malware".to_string()],
+            tags: vec![
+                "unit".to_string(),
+                "detection".to_string(),
+                "malware".to_string(),
+            ],
         });
 
         let test_suite = TestSuite {
@@ -477,7 +479,8 @@ impl TestFramework {
             teardown_function: None,
         };
 
-        self.test_suites.insert("detection_engine".to_string(), test_suite);
+        self.test_suites
+            .insert("detection_engine".to_string(), test_suite);
     }
 
     /// Create shellcode detection tests
@@ -496,20 +499,18 @@ impl TestFramework {
                     thread_count: 1,
                     suspicious_indicators: Vec::new(),
                 },
-                memory_data: vec![
-                    MemoryTestData {
-                        base_address: 0x300000,
-                        size: 0x1000,
-                        protection: MemoryProtection::ReadWriteExecute,
-                        contains_shellcode: true,
-                        shellcode_pattern: Some(vec![
-                            0x31, 0xC0,       // XOR EAX, EAX
-                            0x50,             // PUSH EAX
-                            0x68, 0x2F, 0x2F, 0x73, 0x68, // PUSH //sh
-                            0x68, 0x2F, 0x62, 0x69, 0x6E, // PUSH /bin
-                        ]),
-                    }
-                ],
+                memory_data: vec![MemoryTestData {
+                    base_address: 0x300000,
+                    size: 0x1000,
+                    protection: MemoryProtection::ReadWriteExecute,
+                    contains_shellcode: true,
+                    shellcode_pattern: Some(vec![
+                        0x31, 0xC0, // XOR EAX, EAX
+                        0x50, // PUSH EAX
+                        0x68, 0x2F, 0x2F, 0x73, 0x68, // PUSH //sh
+                        0x68, 0x2F, 0x62, 0x69, 0x6E, // PUSH /bin
+                    ]),
+                }],
                 thread_data: Vec::new(),
                 injection_type: Some(InjectionTestType::ShellcodeInjection),
             }),
@@ -526,7 +527,8 @@ impl TestFramework {
             teardown_function: None,
         };
 
-        self.test_suites.insert("shellcode_detection".to_string(), test_suite);
+        self.test_suites
+            .insert("shellcode_detection".to_string(), test_suite);
     }
 
     /// Create process hollowing detection tests
@@ -547,15 +549,13 @@ impl TestFramework {
                         "Unexpected memory layout".to_string(),
                     ],
                 },
-                memory_data: vec![
-                    MemoryTestData {
-                        base_address: 0x400000,
-                        size: 0x20000,
-                        protection: MemoryProtection::ReadWriteExecute,
-                        contains_shellcode: false,
-                        shellcode_pattern: None,
-                    }
-                ],
+                memory_data: vec![MemoryTestData {
+                    base_address: 0x400000,
+                    size: 0x20000,
+                    protection: MemoryProtection::ReadWriteExecute,
+                    contains_shellcode: false,
+                    shellcode_pattern: None,
+                }],
                 thread_data: Vec::new(),
                 injection_type: Some(InjectionTestType::ProcessHollowing),
             }),
@@ -572,7 +572,8 @@ impl TestFramework {
             teardown_function: None,
         };
 
-        self.test_suites.insert("process_hollowing".to_string(), test_suite);
+        self.test_suites
+            .insert("process_hollowing".to_string(), test_suite);
     }
 
     /// Create evasion detection tests
@@ -610,7 +611,8 @@ impl TestFramework {
             teardown_function: None,
         };
 
-        self.test_suites.insert("evasion_detection".to_string(), test_suite);
+        self.test_suites
+            .insert("evasion_detection".to_string(), test_suite);
     }
 
     /// Create threat intelligence tests
@@ -626,12 +628,10 @@ impl TestFramework {
         benchmarks.push(Benchmark {
             name: "single_process_analysis".to_string(),
             description: "Benchmark single process analysis performance".to_string(),
-            benchmark_function: BenchmarkFunction::ProcessAnalysis(
-                ProcessAnalysisBenchmark {
-                    process_count: 1,
-                    complexity_level: ComplexityLevel::Moderate,
-                }
-            ),
+            benchmark_function: BenchmarkFunction::ProcessAnalysis(ProcessAnalysisBenchmark {
+                process_count: 1,
+                complexity_level: ComplexityLevel::Moderate,
+            }),
             warm_up_iterations: 10,
             measurement_iterations: 100,
             target_metrics: vec![
@@ -644,12 +644,10 @@ impl TestFramework {
         benchmarks.push(Benchmark {
             name: "bulk_process_analysis".to_string(),
             description: "Benchmark bulk process analysis performance".to_string(),
-            benchmark_function: BenchmarkFunction::ProcessAnalysis(
-                ProcessAnalysisBenchmark {
-                    process_count: 100,
-                    complexity_level: ComplexityLevel::Simple,
-                }
-            ),
+            benchmark_function: BenchmarkFunction::ProcessAnalysis(ProcessAnalysisBenchmark {
+                process_count: 100,
+                complexity_level: ComplexityLevel::Simple,
+            }),
             warm_up_iterations: 5,
             measurement_iterations: 20,
             target_metrics: vec![
@@ -666,7 +664,8 @@ impl TestFramework {
             baseline_measurements: HashMap::new(),
         };
 
-        self.benchmark_suites.insert("performance".to_string(), benchmark_suite);
+        self.benchmark_suites
+            .insert("performance".to_string(), benchmark_suite);
     }
 
     /// Create integration tests
@@ -714,17 +713,20 @@ impl TestFramework {
             teardown_function: None,
         };
 
-        self.test_suites.insert("integration".to_string(), test_suite);
+        self.test_suites
+            .insert("integration".to_string(), test_suite);
     }
 
     /// Run all test suites
     pub fn run_all_tests(&mut self) -> TestRunReport {
         let mut report = TestRunReport::new();
-        
-        let suite_names_and_tests: Vec<(String, TestSuite)> = self.test_suites.iter()
+
+        let suite_names_and_tests: Vec<(String, TestSuite)> = self
+            .test_suites
+            .iter()
             .map(|(name, suite)| (name.clone(), suite.clone()))
             .collect();
-        
+
         for (suite_name, test_suite) in suite_names_and_tests {
             let suite_results = self.run_test_suite(&test_suite);
             report.add_suite_results(suite_name, suite_results);
@@ -759,20 +761,16 @@ impl TestFramework {
     /// Run a single test case
     fn run_test_case(&mut self, test_case: &TestCase) -> TestResult {
         let start_time = Instant::now();
-        
+
         let status = match &test_case.test_function {
             TestFunction::DetectionTest(params) => {
                 self.run_detection_test(params, &test_case.expected_result)
             }
-            TestFunction::PerformanceTest(params) => {
-                self.run_performance_test(params)
-            }
+            TestFunction::PerformanceTest(params) => self.run_performance_test(params),
             TestFunction::IntegrationTest(params) => {
                 self.run_integration_test(params, &test_case.expected_result)
             }
-            TestFunction::StressTest(params) => {
-                self.run_stress_test(params)
-            }
+            TestFunction::StressTest(params) => self.run_stress_test(params),
         };
 
         let execution_time = start_time.elapsed();
@@ -793,7 +791,11 @@ impl TestFramework {
     }
 
     /// Run detection test
-    fn run_detection_test(&self, params: &DetectionTestParams, expected: &ExpectedResult) -> TestStatus {
+    fn run_detection_test(
+        &self,
+        params: &DetectionTestParams,
+        expected: &ExpectedResult,
+    ) -> TestStatus {
         // Create test detection engine
         let mut engine = match DetectionEngine::new() {
             Ok(engine) => engine,
@@ -809,24 +811,28 @@ impl TestFramework {
             thread_count: params.process_data.thread_count,
         };
 
-        let memory_regions: Vec<MemoryRegion> = params.memory_data.iter().map(|mem| {
-            MemoryRegion {
+        let memory_regions: Vec<MemoryRegion> = params
+            .memory_data
+            .iter()
+            .map(|mem| MemoryRegion {
                 base_address: mem.base_address,
                 size: mem.size,
-                protection: mem.protection.clone(),
+                protection: mem.protection,
                 region_type: "PRIVATE".to_string(),
-            }
-        }).collect();
+            })
+            .collect();
 
-        let threads: Vec<ThreadInfo> = params.thread_data.iter().map(|thread| {
-            ThreadInfo {
+        let threads: Vec<ThreadInfo> = params
+            .thread_data
+            .iter()
+            .map(|thread| ThreadInfo {
                 tid: thread.tid,
                 owner_pid: process_info.pid,
                 start_address: thread.entry_point,
                 creation_time: 0,
                 state: crate::thread::ThreadState::Running,
-            }
-        }).collect();
+            })
+            .collect();
 
         // Run detection
         let result = engine.analyze_process(&process_info, &memory_regions, Some(&threads));
@@ -878,7 +884,11 @@ impl TestFramework {
     }
 
     /// Run integration test
-    fn run_integration_test(&self, _params: &IntegrationTestParams, _expected: &ExpectedResult) -> TestStatus {
+    fn run_integration_test(
+        &self,
+        _params: &IntegrationTestParams,
+        _expected: &ExpectedResult,
+    ) -> TestStatus {
         // Implementation would test component interactions
         TestStatus::Passed
     }
@@ -899,6 +909,12 @@ pub struct TestRunReport {
     pub error_tests: usize,
     pub execution_time: Duration,
     pub suite_results: HashMap<String, Vec<TestResult>>,
+}
+
+impl Default for TestRunReport {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl TestRunReport {
@@ -937,6 +953,12 @@ impl TestRunReport {
     }
 }
 
+impl Default for TestDataGenerator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TestDataGenerator {
     pub fn new() -> Self {
         Self {
@@ -947,7 +969,7 @@ impl TestDataGenerator {
     }
 
     /// Generate synthetic test processes
-    pub fn generate_test_processes(&self, count: usize) -> Vec<ProcessTestData> {
+    pub fn generate_test_processes(&self, _count: usize) -> Vec<ProcessTestData> {
         // Implementation would generate realistic test process data
         Vec::new()
     }
@@ -959,6 +981,12 @@ impl TestDataGenerator {
             vec![0x31, 0xC0, 0x50],       // XOR EAX, EAX; PUSH EAX
             vec![0xCC, 0xCC, 0xCC, 0xCC], // INT3 pattern
         ]
+    }
+}
+
+impl Default for PerformanceProfiler {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -983,7 +1011,9 @@ impl PerformanceProfiler {
 
     /// Stop profiling and collect results
     pub fn stop_profiling(&mut self, session_id: &str) -> Option<Vec<Measurement>> {
-        self.active_profiles.remove(session_id).map(|session| session.measurements)
+        self.active_profiles
+            .remove(session_id)
+            .map(|session| session.measurements)
     }
 
     /// Record a measurement

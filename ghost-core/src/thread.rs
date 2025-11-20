@@ -60,7 +60,7 @@ mod platform {
     use anyhow::{Context, Result};
     use windows::Win32::Foundation::CloseHandle;
     use windows::Win32::System::Diagnostics::ToolHelp::{
-        CreateToolhelp32Snapshot, Thread32First, Thread32Next, THREADENTRY32, TH32CS_SNAPTHREAD,
+        CreateToolhelp32Snapshot, Thread32First, Thread32Next, TH32CS_SNAPTHREAD, THREADENTRY32,
     };
     use windows::Win32::System::Threading::{
         OpenThread, THREAD_QUERY_INFORMATION, THREAD_QUERY_LIMITED_INFORMATION,
@@ -216,8 +216,7 @@ mod platform {
 
     pub fn enumerate_threads(pid: u32) -> Result<Vec<ThreadInfo>> {
         let task_dir = format!("/proc/{}/task", pid);
-        let entries =
-            fs::read_dir(&task_dir).context(format!("Failed to read {}", task_dir))?;
+        let entries = fs::read_dir(&task_dir).context(format!("Failed to read {}", task_dir))?;
 
         let mut threads = Vec::new();
 
@@ -341,11 +340,7 @@ mod platform {
         }
 
         extern "C" {
-            fn task_for_pid(
-                target_tport: mach_port_t,
-                pid: i32,
-                task: *mut mach_port_t,
-            ) -> i32;
+            fn task_for_pid(target_tport: mach_port_t, pid: i32, task: *mut mach_port_t) -> i32;
             fn mach_task_self() -> mach_port_t;
             fn task_threads(
                 target_task: mach_port_t,
@@ -359,11 +354,7 @@ mod platform {
                 thread_info_out_cnt: *mut u32,
             ) -> i32;
             fn mach_port_deallocate(task: mach_port_t, name: mach_port_t) -> i32;
-            fn vm_deallocate(
-                target_task: mach_port_t,
-                address: usize,
-                size: usize,
-            ) -> i32;
+            fn vm_deallocate(target_task: mach_port_t, address: usize, size: usize) -> i32;
         }
 
         let mut threads = Vec::new();
@@ -420,11 +411,9 @@ mod platform {
 
                 // Calculate creation time from user_time + system_time (accumulated time)
                 let creation_time = if kr == 0 {
-                    let total_microseconds = (info.user_time.seconds as u64 * 1_000_000
-                        + info.user_time.microseconds as u64)
+                    (info.user_time.seconds as u64 * 1_000_000 + info.user_time.microseconds as u64)
                         + (info.system_time.seconds as u64 * 1_000_000
-                            + info.system_time.microseconds as u64);
-                    total_microseconds
+                            + info.system_time.microseconds as u64)
                 } else {
                     0
                 };

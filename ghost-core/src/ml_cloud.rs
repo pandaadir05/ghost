@@ -1,7 +1,7 @@
-use crate::{ProcessInfo, MemoryRegion, GhostError};
+use crate::{GhostError, MemoryRegion, ProcessInfo};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::time::{SystemTime, Duration};
+use std::time::{Duration, SystemTime};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CloudMLEngine {
@@ -111,8 +111,11 @@ impl CloudMLEngine {
 
         // Simulate ML inference
         let start_time = SystemTime::now();
-        
-        let threat_level = if memory_regions.iter().any(|r| r.protection.is_executable() && r.protection.is_writable()) {
+
+        let threat_level = if memory_regions
+            .iter()
+            .any(|r| r.protection.is_executable() && r.protection.is_writable())
+        {
             ThreatSeverity::High
         } else if memory_regions.len() > 50 {
             ThreatSeverity::Medium
@@ -122,13 +125,11 @@ impl CloudMLEngine {
 
         let prediction = ThreatPrediction {
             threat_level,
-            technique_predictions: vec![
-                TechniquePrediction {
-                    technique_id: "T1055".to_string(),
-                    technique_name: "Process Injection".to_string(),
-                    confidence: 0.85,
-                },
-            ],
+            technique_predictions: vec![TechniquePrediction {
+                technique_id: "T1055".to_string(),
+                technique_name: "Process Injection".to_string(),
+                confidence: 0.85,
+            }],
             anomaly_score: 0.75,
         };
 
@@ -140,11 +141,14 @@ impl CloudMLEngine {
         };
 
         // Cache result
-        self.cache.insert(cache_key, CachedPrediction {
-            result: result.clone(),
-            timestamp: SystemTime::now(),
-            ttl: Duration::from_secs(300), // 5 minutes
-        });
+        self.cache.insert(
+            cache_key,
+            CachedPrediction {
+                result: result.clone(),
+                timestamp: SystemTime::now(),
+                ttl: Duration::from_secs(300), // 5 minutes
+            },
+        );
 
         Ok(result)
     }

@@ -54,8 +54,8 @@ mod platform {
         CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
         TH32CS_SNAPPROCESS,
     };
-    use windows::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
     use windows::Win32::System::ProcessStatus::GetProcessImageFileNameW;
+    use windows::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
 
     pub fn enumerate_processes() -> Result<Vec<ProcessInfo>> {
         let mut processes = Vec::new();
@@ -106,7 +106,7 @@ mod platform {
         unsafe {
             let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid).ok()?;
             let mut buffer = [0u16; 1024];
-            
+
             if GetProcessImageFileNameW(handle, &mut buffer) > 0 {
                 let _ = CloseHandle(handle);
                 let path = String::from_utf16_lossy(
@@ -163,13 +163,14 @@ mod platform {
 
     fn get_process_info(pid: u32) -> Result<ProcessInfo> {
         let stat_path = format!("/proc/{}/stat", pid);
-        let stat_content =
-            fs::read_to_string(&stat_path).context("Failed to read process stat")?;
+        let stat_content = fs::read_to_string(&stat_path).context("Failed to read process stat")?;
 
         let (name, ppid, thread_count) = parse_stat(&stat_content)?;
 
         let exe_path = format!("/proc/{}/exe", pid);
-        let path = fs::read_link(&exe_path).ok().map(|p| p.to_string_lossy().into_owned());
+        let path = fs::read_link(&exe_path)
+            .ok()
+            .map(|p| p.to_string_lossy().into_owned());
 
         Ok(ProcessInfo {
             pid,
@@ -219,7 +220,9 @@ mod platform {
     use anyhow::Result;
 
     pub fn enumerate_processes() -> Result<Vec<ProcessInfo>> {
-        Err(anyhow::anyhow!("Process enumeration not supported on this platform"))
+        Err(anyhow::anyhow!(
+            "Process enumeration not supported on this platform"
+        ))
     }
 }
 

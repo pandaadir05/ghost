@@ -1,5 +1,3 @@
-use crate::{GhostError, Result};
-
 #[derive(Debug, Clone)]
 pub struct ShellcodeSignature {
     pub pattern: Vec<u8>,
@@ -17,6 +15,7 @@ pub struct ShellcodeDetection {
 }
 
 /// Common shellcode patterns and signatures
+#[derive(Debug)]
 pub struct ShellcodeDetector {
     signatures: Vec<ShellcodeSignature>,
 }
@@ -298,8 +297,12 @@ impl ShellcodeDetector {
 
         // Linux x64 execve pattern
         self.signatures.push(ShellcodeSignature {
-            pattern: vec![0x48, 0x31, 0xD2, 0x48, 0xBB, 0xFF, 0x2F, 0x62, 0x69, 0x6E, 0x2F, 0x73, 0x68], // xor rdx, rdx; mov rbx, "/bin/sh"
-            mask: vec![0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF],
+            pattern: vec![
+                0x48, 0x31, 0xD2, 0x48, 0xBB, 0xFF, 0x2F, 0x62, 0x69, 0x6E, 0x2F, 0x73, 0x68,
+            ], // xor rdx, rdx; mov rbx, "/bin/sh"
+            mask: vec![
+                0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+            ],
             name: "Linux x64 execve /bin/sh",
             confidence: 0.98,
         });
@@ -407,7 +410,7 @@ impl ShellcodeDetector {
 
             let region = &data[search_start..search_end];
             let matches = self.find_pattern_matches(region, &sig.pattern, &sig.mask);
-            
+
             if !matches.is_empty() {
                 detection.signature_matches.push(sig.name.to_string());
                 detection.confidence = (detection.confidence + sig.confidence).min(1.0);
@@ -466,7 +469,11 @@ impl ShellcodeDetector {
         }
     }
 
-    fn check_instruction_patterns(&self, data: &[u8], base_address: usize) -> Option<ShellcodeDetection> {
+    fn check_instruction_patterns(
+        &self,
+        data: &[u8],
+        base_address: usize,
+    ) -> Option<ShellcodeDetection> {
         if data.len() < 32 {
             return None;
         }
@@ -479,10 +486,10 @@ impl ShellcodeDetector {
             match data[i] {
                 0xEB => suspicious_instructions += 1, // Short jump
                 0xE9 => suspicious_instructions += 1, // Near jump
-                0xFF if data.get(i + 1).map_or(false, |&b| (b & 0x38) == 0x20) => {
+                0xFF if data.get(i + 1).is_some_and(|&b| (b & 0x38) == 0x20) => {
                     suspicious_instructions += 2; // Indirect jump
                 }
-                0x0F if data.get(i + 1).map_or(false, |&b| b == 0x05) => {
+                0x0F if data.get(i + 1).is_some_and(|&b| b == 0x05) => {
                     suspicious_instructions += 2; // SYSCALL
                 }
                 _ => {}

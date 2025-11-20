@@ -1,7 +1,7 @@
 use crate::GhostError;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::time::{SystemTime, Duration};
+use std::time::{Duration, SystemTime};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LiveThreatFeeds {
@@ -72,7 +72,7 @@ impl LiveThreatFeeds {
 
     pub async fn update_feeds(&mut self) -> Result<usize, GhostError> {
         let mut updated_count = 0;
-        
+
         for feed in &mut self.feeds {
             if !feed.enabled {
                 continue;

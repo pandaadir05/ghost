@@ -1,7 +1,6 @@
-use crate::{ProcessInfo, MemoryRegion, GhostError};
+use crate::{GhostError, MemoryRegion, ProcessInfo};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::time::{SystemTime, Duration};
 
 #[derive(Debug)]
 pub struct NeuralMemoryAnalyzer {
@@ -143,24 +142,24 @@ impl NeuralMemoryAnalyzer {
 
     pub async fn analyze_memory_regions(
         &mut self,
-        process: &ProcessInfo,
+        _process: &ProcessInfo,
         memory_regions: &[MemoryRegion],
     ) -> Result<NeuralAnalysisResult, GhostError> {
         // Extract features
         let features = self.extract_features(memory_regions)?;
-        
+
         // Run neural ensemble
         let predictions = self.run_neural_ensemble(&features).await?;
-        
+
         // Calculate threat probability
         let threat_probability = self.calculate_threat_probability(&predictions);
-        
+
         // Detect patterns
         let detected_patterns = self.detect_patterns(&features)?;
-        
+
         // Analyze evasion techniques
         let evasion_techniques = self.analyze_evasion(&features)?;
-        
+
         Ok(NeuralAnalysisResult {
             threat_probability,
             detected_patterns,
@@ -173,33 +172,45 @@ impl NeuralMemoryAnalyzer {
 
     fn extract_features(&self, memory_regions: &[MemoryRegion]) -> Result<Vec<f32>, GhostError> {
         let mut features = Vec::new();
-        
+
         // Basic features
         features.push(memory_regions.len() as f32);
-        
+
         // Protection features
-        let rwx_count = memory_regions.iter()
-            .filter(|r| r.protection.is_readable() && r.protection.is_writable() && r.protection.is_executable())
+        let rwx_count = memory_regions
+            .iter()
+            .filter(|r| {
+                r.protection.is_readable()
+                    && r.protection.is_writable()
+                    && r.protection.is_executable()
+            })
             .count() as f32;
         features.push(rwx_count);
-        
+
         Ok(features)
     }
 
-    async fn run_neural_ensemble(&self, features: &[f32]) -> Result<Vec<ModelPrediction>, GhostError> {
+    async fn run_neural_ensemble(
+        &self,
+        features: &[f32],
+    ) -> Result<Vec<ModelPrediction>, GhostError> {
         let mut predictions = Vec::new();
-        
+
         for network in &self.neural_networks {
             let prediction = self.simulate_neural_inference(network, features).await?;
             predictions.push(prediction);
         }
-        
+
         Ok(predictions)
     }
 
-    async fn simulate_neural_inference(&self, network: &NeuralNetwork, _features: &[f32]) -> Result<ModelPrediction, GhostError> {
+    async fn simulate_neural_inference(
+        &self,
+        network: &NeuralNetwork,
+        _features: &[f32],
+    ) -> Result<ModelPrediction, GhostError> {
         let prediction = network.accuracy * 0.5; // Simulate prediction
-        
+
         Ok(ModelPrediction {
             model_id: network.network_id.clone(),
             prediction,
@@ -207,17 +218,18 @@ impl NeuralMemoryAnalyzer {
             inference_time_ms: 15.0,
         })
     }
-    
+
     fn calculate_threat_probability(&self, predictions: &[ModelPrediction]) -> f32 {
         if predictions.is_empty() {
             return 0.0;
         }
-        
-        let weighted_sum: f32 = predictions.iter()
+
+        let weighted_sum: f32 = predictions
+            .iter()
             .map(|p| p.prediction * p.confidence)
             .sum();
         let total_weight: f32 = predictions.iter().map(|p| p.confidence).sum();
-        
+
         if total_weight > 0.0 {
             weighted_sum / total_weight
         } else {

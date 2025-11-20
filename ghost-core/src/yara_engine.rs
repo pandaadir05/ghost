@@ -1,4 +1,4 @@
-use crate::{ProcessInfo, MemoryRegion, GhostError};
+use crate::{GhostError, MemoryRegion, ProcessInfo};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::SystemTime;
@@ -87,22 +87,20 @@ impl DynamicYaraEngine {
 
     pub async fn update_rules(&mut self) -> Result<usize, GhostError> {
         let mut updated_count = 0;
-        
+
         for source in &mut self.sources {
             if !source.enabled {
                 continue;
             }
 
             // Simulate rule download
-            let new_rules = vec![
-                YaraRule {
-                    name: format!("generic_malware_{}", updated_count + 1),
-                    content: "rule generic_malware { condition: true }".to_string(),
-                    source: source.name.clone(),
-                    threat_level: ThreatLevel::Medium,
-                    last_updated: SystemTime::now(),
-                },
-            ];
+            let new_rules = vec![YaraRule {
+                name: format!("generic_malware_{}", updated_count + 1),
+                content: "rule generic_malware { condition: true }".to_string(),
+                source: source.name.clone(),
+                threat_level: ThreatLevel::Medium,
+                last_updated: SystemTime::now(),
+            }];
 
             self.rules.extend(new_rules);
             source.rule_count = self.rules.len();
@@ -125,7 +123,7 @@ impl DynamicYaraEngine {
         // Simulate YARA scanning
         for (i, region) in memory_regions.iter().enumerate() {
             bytes_scanned += region.size;
-            
+
             // Simulate finding suspicious patterns
             if region.protection.is_executable() && region.protection.is_writable() {
                 matches.push(RuleMatch {
@@ -138,9 +136,7 @@ impl DynamicYaraEngine {
             }
         }
 
-        let scan_time_ms = start_time.elapsed()
-            .unwrap_or_default()
-            .as_millis() as u64;
+        let scan_time_ms = start_time.elapsed().unwrap_or_default().as_millis() as u64;
 
         Ok(YaraScanResult {
             matches,

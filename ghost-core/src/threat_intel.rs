@@ -1,10 +1,11 @@
+use crate::{DetectionResult, ProcessInfo, ThreatLevel};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::time::{SystemTime, Duration};
-use serde::{Serialize, Deserialize};
-use crate::{DetectionResult, ThreatLevel, ProcessInfo};
+use std::time::{Duration, SystemTime};
 
 /// Threat Intelligence Integration Module
 /// Provides real-time threat context and IOC matching
+#[derive(Debug)]
 pub struct ThreatIntelligence {
     ioc_database: IocDatabase,
     threat_feeds: Vec<ThreatFeed>,
@@ -81,6 +82,7 @@ pub struct Campaign {
     pub iocs: Vec<String>,
 }
 
+#[derive(Debug)]
 pub struct IocDatabase {
     indicators: HashMap<String, IndicatorOfCompromise>,
     hash_index: HashMap<String, Vec<String>>,
@@ -127,6 +129,7 @@ pub struct FrequencyRequirement {
     pub time_window: Duration,
 }
 
+#[derive(Debug)]
 pub struct ThreatFeed {
     pub name: String,
     pub url: String,
@@ -153,6 +156,7 @@ pub struct FeedCredential {
     pub password: Option<String>,
 }
 
+#[derive(Debug)]
 pub struct AttributionEngine {
     threat_actors: HashMap<String, ThreatActor>,
     campaigns: HashMap<String, Campaign>,
@@ -171,18 +175,32 @@ pub struct AttributionRule {
 
 #[derive(Debug, Clone)]
 pub enum AttributionCondition {
-    IocMatch { ioc_types: Vec<IocType>, min_matches: u32 },
-    TechniquePattern { techniques: Vec<String>, correlation: f32 },
-    TemporalPattern { time_windows: Vec<Duration>, frequency: u32 },
-    GeographicalIndicator { regions: Vec<String>, confidence: f32 },
+    IocMatch {
+        ioc_types: Vec<IocType>,
+        min_matches: u32,
+    },
+    TechniquePattern {
+        techniques: Vec<String>,
+        correlation: f32,
+    },
+    TemporalPattern {
+        time_windows: Vec<Duration>,
+        frequency: u32,
+    },
+    GeographicalIndicator {
+        regions: Vec<String>,
+        confidence: f32,
+    },
 }
 
+#[derive(Debug)]
 pub struct SimilarityCalculator {
     technique_weights: HashMap<String, f32>,
     temporal_weights: HashMap<String, f32>,
     behavioral_weights: HashMap<String, f32>,
 }
 
+#[derive(Debug)]
 pub struct ReputationCache {
     process_reputations: HashMap<String, ProcessReputation>,
     ip_reputations: HashMap<String, IpReputation>,
@@ -311,7 +329,7 @@ impl ThreatIntelligence {
 
         // Initialize with basic IOCs
         self.load_default_iocs().await?;
-        
+
         Ok(())
     }
 
@@ -321,7 +339,10 @@ impl ThreatIntelligence {
         let mut risk_score = 0.0f32;
 
         // Check process name against IOCs
-        if let Some(iocs) = self.ioc_database.lookup_process_name(&detection.process.name) {
+        if let Some(iocs) = self
+            .ioc_database
+            .lookup_process_name(&detection.process.name)
+        {
             matched_iocs.extend(iocs);
         }
 
@@ -349,8 +370,9 @@ impl ThreatIntelligence {
         }
 
         // Perform attribution analysis
-        let (threat_actor, campaign, attribution_confidence) = 
-            self.attribution_engine.analyze_attribution(&matched_iocs, &detection.indicators);
+        let (threat_actor, campaign, attribution_confidence) = self
+            .attribution_engine
+            .analyze_attribution(&matched_iocs, &detection.indicators);
 
         // Generate recommended actions
         let recommended_actions = self.generate_recommendations(&matched_iocs, risk_score);
@@ -373,16 +395,19 @@ impl ThreatIntelligence {
     /// Update all threat feeds
     pub async fn update_threat_feeds(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         let mut updates = Vec::new();
-        
+
         for (idx, feed) in self.threat_feeds.iter().enumerate() {
-            if SystemTime::now().duration_since(feed.last_update).unwrap_or_default() 
-                >= feed.update_interval {
+            if SystemTime::now()
+                .duration_since(feed.last_update)
+                .unwrap_or_default()
+                >= feed.update_interval
+            {
                 // Fetch data inline to avoid borrow issues
                 let iocs = Vec::new(); // Stub implementation
                 updates.push((idx, iocs));
             }
         }
-        
+
         for (idx, iocs) in updates {
             self.ioc_database.update_indicators(iocs);
             self.threat_feeds[idx].last_update = SystemTime::now();
@@ -391,7 +416,10 @@ impl ThreatIntelligence {
     }
 
     /// Fetch data from a threat feed
-    async fn fetch_feed_data(&self, feed: &ThreatFeed) -> Result<Vec<IndicatorOfCompromise>, Box<dyn std::error::Error>> {
+    async fn fetch_feed_data(
+        &self,
+        feed: &ThreatFeed,
+    ) -> Result<Vec<IndicatorOfCompromise>, Box<dyn std::error::Error>> {
         // Implementation would depend on feed type
         match feed.feed_type {
             FeedType::JSON => self.fetch_json_feed(feed).await,
@@ -401,19 +429,28 @@ impl ThreatIntelligence {
         }
     }
 
-    async fn fetch_json_feed(&self, feed: &ThreatFeed) -> Result<Vec<IndicatorOfCompromise>, Box<dyn std::error::Error>> {
+    async fn fetch_json_feed(
+        &self,
+        feed: &ThreatFeed,
+    ) -> Result<Vec<IndicatorOfCompromise>, Box<dyn std::error::Error>> {
         // Placeholder implementation
         // In a real implementation, this would fetch from the feed URL
         Ok(Vec::new())
     }
 
-    async fn fetch_stix_feed(&self, feed: &ThreatFeed) -> Result<Vec<IndicatorOfCompromise>, Box<dyn std::error::Error>> {
+    async fn fetch_stix_feed(
+        &self,
+        feed: &ThreatFeed,
+    ) -> Result<Vec<IndicatorOfCompromise>, Box<dyn std::error::Error>> {
         // Placeholder implementation
         // In a real implementation, this would parse STIX/TAXII data
         Ok(Vec::new())
     }
 
-    async fn fetch_csv_feed(&self, feed: &ThreatFeed) -> Result<Vec<IndicatorOfCompromise>, Box<dyn std::error::Error>> {
+    async fn fetch_csv_feed(
+        &self,
+        feed: &ThreatFeed,
+    ) -> Result<Vec<IndicatorOfCompromise>, Box<dyn std::error::Error>> {
         // Placeholder implementation
         // In a real implementation, this would parse CSV threat data
         Ok(Vec::new())
@@ -431,7 +468,10 @@ impl ThreatIntelligence {
                 confidence: 0.6,
                 created_date: SystemTime::now(),
                 expiry_date: None,
-                tags: vec!["process-injection".to_string(), "living-off-the-land".to_string()],
+                tags: vec![
+                    "process-injection".to_string(),
+                    "living-off-the-land".to_string(),
+                ],
                 mitre_techniques: vec!["T1055".to_string()],
             },
             IndicatorOfCompromise {
@@ -467,7 +507,11 @@ impl ThreatIntelligence {
         Ok(())
     }
 
-    fn generate_recommendations(&self, iocs: &[IndicatorOfCompromise], risk_score: f32) -> Vec<String> {
+    fn generate_recommendations(
+        &self,
+        iocs: &[IndicatorOfCompromise],
+        risk_score: f32,
+    ) -> Vec<String> {
         let mut recommendations = Vec::new();
 
         if risk_score > 0.8 {
@@ -487,9 +531,15 @@ impl ThreatIntelligence {
         for ioc in iocs {
             for technique in &ioc.mitre_techniques {
                 match technique.as_str() {
-                    "T1055" => recommendations.push("Deploy process injection countermeasures".to_string()),
-                    "T1055.001" => recommendations.push("Monitor DLL loading activities".to_string()),
-                    "T1055.002" => recommendations.push("Implement PE injection detection".to_string()),
+                    "T1055" => {
+                        recommendations.push("Deploy process injection countermeasures".to_string())
+                    }
+                    "T1055.001" => {
+                        recommendations.push("Monitor DLL loading activities".to_string())
+                    }
+                    "T1055.002" => {
+                        recommendations.push("Implement PE injection detection".to_string())
+                    }
                     _ => {}
                 }
             }
@@ -518,12 +568,14 @@ impl IocDatabase {
         // Update indexes for fast lookup
         match ioc.ioc_type {
             IocType::FileHash => {
-                self.hash_index.entry(ioc.value.clone())
+                self.hash_index
+                    .entry(ioc.value.clone())
                     .or_insert_with(Vec::new)
                     .push(ioc.id.clone());
             }
             IocType::MemorySignature | IocType::BehaviorPattern => {
-                self.pattern_index.entry(ioc.value.clone())
+                self.pattern_index
+                    .entry(ioc.value.clone())
                     .or_insert_with(Vec::new)
                     .push(ioc.id.clone());
             }
@@ -532,23 +584,33 @@ impl IocDatabase {
     }
 
     pub fn lookup_process_name(&self, name: &str) -> Option<Vec<IndicatorOfCompromise>> {
-        let matches: Vec<_> = self.indicators
+        let matches: Vec<_> = self
+            .indicators
             .values()
             .filter(|ioc| ioc.ioc_type == IocType::ProcessName && ioc.value == name)
             .cloned()
             .collect();
-        
-        if matches.is_empty() { None } else { Some(matches) }
+
+        if matches.is_empty() {
+            None
+        } else {
+            Some(matches)
+        }
     }
 
     pub fn lookup_process_path(&self, path: &str) -> Option<Vec<IndicatorOfCompromise>> {
-        let matches: Vec<_> = self.indicators
+        let matches: Vec<_> = self
+            .indicators
             .values()
             .filter(|ioc| ioc.ioc_type == IocType::ProcessPath && path.contains(&ioc.value))
             .cloned()
             .collect();
-        
-        if matches.is_empty() { None } else { Some(matches) }
+
+        if matches.is_empty() {
+            None
+        } else {
+            Some(matches)
+        }
     }
 
     pub fn lookup_memory_signature(&self, signature: &str) -> Option<Vec<IndicatorOfCompromise>> {
@@ -558,7 +620,11 @@ impl IocDatabase {
                 .filter_map(|id| self.indicators.get(id))
                 .cloned()
                 .collect();
-            if matches.is_empty() { None } else { Some(matches) }
+            if matches.is_empty() {
+                None
+            } else {
+                Some(matches)
+            }
         } else {
             None
         }
@@ -581,9 +647,11 @@ impl AttributionEngine {
         }
     }
 
-    pub fn analyze_attribution(&self, iocs: &[IndicatorOfCompromise], indicators: &[String]) 
-        -> (Option<ThreatActor>, Option<Campaign>, f32) {
-        
+    pub fn analyze_attribution(
+        &self,
+        iocs: &[IndicatorOfCompromise],
+        indicators: &[String],
+    ) -> (Option<ThreatActor>, Option<Campaign>, f32) {
         let mut best_actor: Option<ThreatActor> = None;
         let mut best_campaign: Option<Campaign> = None;
         let mut best_confidence = 0.0f32;
@@ -591,7 +659,7 @@ impl AttributionEngine {
         // Analyze each attribution rule
         for rule in &self.attribution_rules {
             let confidence = self.evaluate_attribution_rule(rule, iocs, indicators);
-            
+
             if confidence > best_confidence {
                 best_confidence = confidence;
                 if let Some(actor) = self.threat_actors.get(&rule.threat_actor) {
@@ -608,29 +676,40 @@ impl AttributionEngine {
         (best_actor, best_campaign, best_confidence)
     }
 
-    fn evaluate_attribution_rule(&self, rule: &AttributionRule, 
-                                 iocs: &[IndicatorOfCompromise], 
-                                 indicators: &[String]) -> f32 {
+    fn evaluate_attribution_rule(
+        &self,
+        rule: &AttributionRule,
+        iocs: &[IndicatorOfCompromise],
+        indicators: &[String],
+    ) -> f32 {
         let mut total_confidence = 0.0f32;
         let mut condition_count = 0;
 
         for condition in &rule.conditions {
             match condition {
-                AttributionCondition::IocMatch { ioc_types, min_matches } => {
-                    let matches = iocs.iter()
+                AttributionCondition::IocMatch {
+                    ioc_types,
+                    min_matches,
+                } => {
+                    let matches = iocs
+                        .iter()
                         .filter(|ioc| ioc_types.contains(&ioc.ioc_type))
                         .count() as u32;
-                    
+
                     if matches >= *min_matches {
                         total_confidence += rule.confidence_weight;
                     }
                 }
-                AttributionCondition::TechniquePattern { techniques, correlation } => {
-                    let technique_matches = iocs.iter()
+                AttributionCondition::TechniquePattern {
+                    techniques,
+                    correlation,
+                } => {
+                    let technique_matches = iocs
+                        .iter()
                         .flat_map(|ioc| &ioc.mitre_techniques)
                         .filter(|tech| techniques.contains(tech))
                         .count();
-                    
+
                     if technique_matches as f32 / techniques.len() as f32 >= *correlation {
                         total_confidence += rule.confidence_weight;
                     }

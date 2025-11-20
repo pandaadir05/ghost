@@ -4,9 +4,7 @@
 //! used for process injection (T1055.003, T1055.012).
 //! On Linux, it detects LD_PRELOAD and LD_LIBRARY_PATH based injection.
 
-use crate::{GhostError, Result};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 /// Type of hook detected.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -78,18 +76,18 @@ mod platform {
     use std::collections::HashMap;
     use windows::Win32::Foundation::CloseHandle;
     use windows::Win32::System::Diagnostics::Debug::ReadProcessMemory;
-    use windows::Win32::System::LibraryLoader::{
-        GetModuleHandleW, GetProcAddress, LoadLibraryW,
-    };
+    use windows::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress, LoadLibraryW};
     use windows::Win32::System::ProcessStatus::{
         EnumProcessModulesEx, GetModuleBaseNameW, GetModuleInformation, LIST_MODULES_ALL,
         MODULEINFO,
     };
-    use windows::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_INFORMATION, PROCESS_VM_READ};
+    use windows::Win32::System::Threading::{
+        OpenProcess, PROCESS_QUERY_INFORMATION, PROCESS_VM_READ,
+    };
     use windows::Win32::UI::WindowsAndMessaging::{
         WH_CALLWNDPROC, WH_CALLWNDPROCRET, WH_CBT, WH_DEBUG, WH_FOREGROUNDIDLE, WH_GETMESSAGE,
-        WH_JOURNALPLAYBACK, WH_JOURNALRECORD, WH_KEYBOARD, WH_KEYBOARD_LL, WH_MOUSE,
-        WH_MOUSE_LL, WH_MSGFILTER, WH_SHELL, WH_SYSMSGFILTER,
+        WH_JOURNALPLAYBACK, WH_JOURNALRECORD, WH_KEYBOARD, WH_KEYBOARD_LL, WH_MOUSE, WH_MOUSE_LL,
+        WH_MSGFILTER, WH_SHELL, WH_SYSMSGFILTER,
     };
 
     /// Critical APIs commonly hooked for injection.
@@ -151,10 +149,14 @@ mod platform {
         let mut hooks = Vec::new();
 
         unsafe {
-            let handle = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, false, target_pid)
-                .map_err(|e| GhostError::Process {
-                    message: format!("Failed to open process: {}", e),
-                })?;
+            let handle = OpenProcess(
+                PROCESS_QUERY_INFORMATION | PROCESS_VM_READ,
+                false,
+                target_pid,
+            )
+            .map_err(|e| GhostError::Process {
+                message: format!("Failed to open process: {}", e),
+            })?;
 
             // Get loaded modules in target process
             let mut modules = [windows::Win32::Foundation::HMODULE::default(); 1024];
@@ -407,11 +409,10 @@ mod platform {
     /// Detect LD_PRELOAD environment variable in process.
     fn detect_ld_preload(pid: u32) -> Result<Vec<HookInfo>> {
         let environ_path = format!("/proc/{}/environ", pid);
-        let environ_content = fs::read_to_string(&environ_path).map_err(|e| {
-            GhostError::Process {
+        let environ_content =
+            fs::read_to_string(&environ_path).map_err(|e| GhostError::Process {
                 message: format!("Failed to read process environment: {}", e),
-            }
-        })?;
+            })?;
 
         let mut hooks = Vec::new();
 
@@ -419,7 +420,7 @@ mod platform {
         for env_var in environ_content.split('\0') {
             if env_var.starts_with("LD_PRELOAD=") {
                 let libraries = env_var.strip_prefix("LD_PRELOAD=").unwrap_or("");
-                
+
                 // Multiple libraries can be separated by spaces or colons
                 for lib in libraries.split(&[' ', ':'][..]) {
                     if !lib.is_empty() {
@@ -442,18 +443,17 @@ mod platform {
     /// Detect LD_LIBRARY_PATH environment variable manipulation.
     fn detect_ld_library_path(pid: u32) -> Result<Vec<HookInfo>> {
         let environ_path = format!("/proc/{}/environ", pid);
-        let environ_content = fs::read_to_string(&environ_path).map_err(|e| {
-            GhostError::Process {
+        let environ_content =
+            fs::read_to_string(&environ_path).map_err(|e| GhostError::Process {
                 message: format!("Failed to read process environment: {}", e),
-            }
-        })?;
+            })?;
 
         let mut hooks = Vec::new();
 
         for env_var in environ_content.split('\0') {
             if env_var.starts_with("LD_LIBRARY_PATH=") {
                 let paths = env_var.strip_prefix("LD_LIBRARY_PATH=").unwrap_or("");
-                
+
                 // Check for suspicious paths
                 for path in paths.split(':') {
                     if is_suspicious_library_path(path) {
@@ -476,25 +476,18 @@ mod platform {
     /// Check if a library path is suspicious.
     fn is_suspicious_library_path(path: &str) -> bool {
         // Suspicious patterns
-        let suspicious_patterns = [
-            "/tmp/",
-            "/dev/shm/",
-            "/var/tmp/",
-            ".",
-            "..",
-            "/home/",
-        ];
+        let suspicious_patterns = ["/tmp/", "/dev/shm/", "/var/tmp/", ".", "..", "/home/"];
 
-        suspicious_patterns.iter().any(|&pattern| path.contains(pattern))
+        suspicious_patterns
+            .iter()
+            .any(|&pattern| path.contains(pattern))
     }
 
     /// Detect ptrace attachment (debugging/injection).
     fn detect_ptrace_attachment(pid: u32) -> Result<bool> {
         let status_path = format!("/proc/{}/status", pid);
-        let status_content = fs::read_to_string(&status_path).map_err(|e| {
-            GhostError::Process {
-                message: format!("Failed to read process status: {}", e),
-            }
+        let status_content = fs::read_to_string(&status_path).map_err(|e| GhostError::Process {
+            message: format!("Failed to read process status: {}", e),
         })?;
 
         // Look for TracerPid field
@@ -505,7 +498,7 @@ mod platform {
                     .nth(1)
                     .and_then(|s| s.parse::<u32>().ok())
                     .unwrap_or(0);
-                
+
                 // Non-zero TracerPid means the process is being traced
                 if tracer_pid != 0 {
                     return Ok(true);
@@ -519,10 +512,8 @@ mod platform {
     /// Detect suspicious loaded libraries.
     fn detect_suspicious_libraries(pid: u32) -> Result<Vec<HookInfo>> {
         let maps_path = format!("/proc/{}/maps", pid);
-        let maps_content = fs::read_to_string(&maps_path).map_err(|e| {
-            GhostError::Process {
-                message: format!("Failed to read process maps: {}", e),
-            }
+        let maps_content = fs::read_to_string(&maps_path).map_err(|e| GhostError::Process {
+            message: format!("Failed to read process maps: {}", e),
         })?;
 
         let mut hooks = Vec::new();
@@ -535,7 +526,7 @@ mod platform {
             }
 
             let pathname = parts[5..].join(" ");
-            
+
             // Check if it's a shared library
             if pathname.ends_with(".so") || pathname.contains(".so.") {
                 // Skip if already seen
@@ -563,29 +554,23 @@ mod platform {
     /// Check if a library path is suspicious.
     fn is_suspicious_library(path: &str) -> bool {
         // Libraries in these locations are often used for injection
-        let suspicious_locations = [
-            "/tmp/",
-            "/dev/shm/",
-            "/var/tmp/",
-            "/home/",
-        ];
+        let suspicious_locations = ["/tmp/", "/dev/shm/", "/var/tmp/", "/home/"];
 
         // Check if library is in a suspicious location
-        if suspicious_locations.iter().any(|&loc| path.starts_with(loc)) {
+        if suspicious_locations
+            .iter()
+            .any(|&loc| path.starts_with(loc))
+        {
             return true;
         }
 
         // Check for libraries with suspicious names
-        let suspicious_names = [
-            "inject",
-            "hook",
-            "cheat",
-            "hack",
-            "rootkit",
-        ];
+        let suspicious_names = ["inject", "hook", "cheat", "hack", "rootkit"];
 
         let path_lower = path.to_lowercase();
-        suspicious_names.iter().any(|&name| path_lower.contains(name))
+        suspicious_names
+            .iter()
+            .any(|&name| path_lower.contains(name))
     }
 
     pub fn get_hook_type_name(_hook_type: u32) -> &'static str {
@@ -596,7 +581,7 @@ mod platform {
 #[cfg(not(any(windows, target_os = "linux")))]
 mod platform {
     use super::HookDetectionResult;
-    use crate::{GhostError, Result};
+    use crate::Result;
 
     pub fn detect_hook_injection(_target_pid: u32) -> Result<HookDetectionResult> {
         // Hook detection is not implemented for this platform
