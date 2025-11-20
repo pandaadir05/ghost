@@ -6,33 +6,20 @@
 allow = [
     "MIT",
     "Apache-2.0",
-    "BSD-2-Clause",
-    "BSD-3-Clause",
-    "ISC",
     "Unlicense",
-    "MPL-2.0",
+    "Zlib",
+    "Unicode-3.0",
 ]
-
-# Allow licenses with specific exceptions
-exceptions = []
-
-# Confidence threshold for license detection
 confidence-threshold = 0.8
 
 [bans]
-# Warn on multiple versions of same crate
 multiple-versions = "warn"
 wildcards = "allow"
-deny = []
 
 [sources]
-# Ensure all dependencies come from crates.io
 unknown-registry = "deny"
 unknown-git = "deny"
 
 [advisories]
-# Check for security vulnerabilities
-vulnerability = "deny"
-unmaintained = "warn"
-unsound = "warn"
-yanked = "warn"
+# Ignore the paste unmaintained warning (ratatui dependency)
+ignore = ["RUSTSEC-2024-0436"]
