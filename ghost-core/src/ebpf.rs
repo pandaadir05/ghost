@@ -21,6 +21,18 @@ pub struct EbpfDetector {
 }
 
 #[cfg(target_os = "linux")]
+impl std::fmt::Debug for EbpfDetector {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("EbpfDetector")
+            .field("program_manager", &self.program_manager)
+            .field("event_processor", &"<EbpfEventProcessor>")
+            .field("filter_manager", &self.filter_manager)
+            .field("ring_buffer", &"<Arc<Mutex<EbpfRingBuffer>>>")
+            .finish()
+    }
+}
+
+#[cfg(target_os = "linux")]
 #[derive(Debug)]
 pub struct EbpfProgramManager {
     loaded_programs: HashMap<String, LoadedProgram>,
