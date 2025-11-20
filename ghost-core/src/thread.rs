@@ -75,10 +75,10 @@ pub struct ThreadBreakpoints {
 /// Information about a single hardware breakpoint
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BreakpointInfo {
-    pub register: u8,          // DR0-DR3 (0-3)
-    pub address: usize,        // Breakpoint address
+    pub register: u8,   // DR0-DR3 (0-3)
+    pub address: usize, // Breakpoint address
     pub bp_type: BreakpointType,
-    pub size: u8,              // 1, 2, 4, or 8 bytes
+    pub size: u8, // 1, 2, 4, or 8 bytes
     pub local_enable: bool,
     pub global_enable: bool,
 }
@@ -86,10 +86,10 @@ pub struct BreakpointInfo {
 /// Hardware breakpoint type
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum BreakpointType {
-    Execute,      // Break on instruction execution
-    Write,        // Break on data write
-    ReadWrite,    // Break on data read or write
-    IoReadWrite,  // Break on I/O read or write
+    Execute,     // Break on instruction execution
+    Write,       // Break on data write
+    ReadWrite,   // Break on data read or write
+    IoReadWrite, // Break on I/O read or write
     Unknown,
 }
 
@@ -286,20 +286,17 @@ mod platform {
     ) -> Result<super::ThreadHijackingResult> {
         use windows::Win32::System::Diagnostics::Debug::ReadProcessMemory;
         use windows::Win32::System::Threading::{
-            GetThreadContext, OpenProcess, SuspendThread, ResumeThread,
-            PROCESS_QUERY_INFORMATION, PROCESS_VM_READ, THREAD_GET_CONTEXT, THREAD_SUSPEND_RESUME,
+            GetThreadContext, OpenProcess, ResumeThread, SuspendThread, PROCESS_QUERY_INFORMATION,
+            PROCESS_VM_READ, THREAD_GET_CONTEXT, THREAD_SUSPEND_RESUME,
         };
 
         let threads = enumerate_threads(pid)?;
         let mut hijacked_threads = Vec::new();
 
         unsafe {
-            let process_handle = OpenProcess(
-                PROCESS_QUERY_INFORMATION | PROCESS_VM_READ,
-                false,
-                pid,
-            )
-            .context("Failed to open process for thread analysis")?;
+            let process_handle =
+                OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, false, pid)
+                    .context("Failed to open process for thread analysis")?;
 
             for thread in threads {
                 let mut indicators = Vec::new();
@@ -337,8 +334,7 @@ mod platform {
 
                             // Check if RIP points to suspicious memory
                             let region = memory_regions.iter().find(|r| {
-                                current_ip >= r.base_address
-                                    && current_ip < r.base_address + r.size
+                                current_ip >= r.base_address && current_ip < r.base_address + r.size
                             });
 
                             if let Some(region) = region {
@@ -351,13 +347,15 @@ mod platform {
                                 // Check for private/unbacked memory
                                 if region.region_type == "PRIVATE" {
                                     is_in_unbacked = true;
-                                    indicators.push("Thread executing from unbacked memory".to_string());
+                                    indicators
+                                        .push("Thread executing from unbacked memory".to_string());
                                 }
 
                                 // Check if start address differs significantly from current IP
                                 if thread.start_address != 0
                                     && (current_ip < thread.start_address.saturating_sub(0x10000)
-                                        || current_ip > thread.start_address.saturating_add(0x10000))
+                                        || current_ip
+                                            > thread.start_address.saturating_add(0x10000))
                                 {
                                     indicators.push(format!(
                                         "Thread IP diverged from start address (start: {:#x}, current: {:#x})",
@@ -384,8 +382,7 @@ mod platform {
                             current_ip = context.Eip as usize;
 
                             let region = memory_regions.iter().find(|r| {
-                                current_ip >= r.base_address
-                                    && current_ip < r.base_address + r.size
+                                current_ip >= r.base_address && current_ip < r.base_address + r.size
                             });
 
                             if let Some(region) = region {
@@ -396,7 +393,8 @@ mod platform {
 
                                 if region.region_type == "PRIVATE" {
                                     is_in_unbacked = true;
-                                    indicators.push("Thread executing from unbacked memory".to_string());
+                                    indicators
+                                        .push("Thread executing from unbacked memory".to_string());
                                 }
                             } else {
                                 indicators.push("Thread IP points to unmapped memory".to_string());
@@ -419,7 +417,8 @@ mod platform {
 
                     if let Some(region) = start_region {
                         if region.region_type == "PRIVATE" && region.protection.is_executable() {
-                            indicators.push("Thread started in private executable memory".to_string());
+                            indicators
+                                .push("Thread started in private executable memory".to_string());
                         }
                     }
                 }
@@ -491,7 +490,8 @@ mod platform {
                         thread_information: *mut std::ffi::c_void,
                         thread_information_length: u32,
                         return_length: *mut u32,
-                    ) -> i32;
+                    )
+                        -> i32;
 
                     let nt_query: NtQueryInformationThreadFn = std::mem::transmute(func);
                     let mut is_io_pending: u32 = 0;
@@ -614,8 +614,8 @@ mod platform {
         use windows::Win32::System::Diagnostics::Debug::CONTEXT;
         use windows::Win32::System::Diagnostics::Debug::CONTEXT_DEBUG_REGISTERS;
         use windows::Win32::System::Threading::{
-            GetThreadContext, SuspendThread, ResumeThread,
-            THREAD_GET_CONTEXT, THREAD_SUSPEND_RESUME,
+            GetThreadContext, ResumeThread, SuspendThread, THREAD_GET_CONTEXT,
+            THREAD_SUSPEND_RESUME,
         };
 
         let threads = enumerate_threads(pid)?;

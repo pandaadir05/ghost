@@ -497,9 +497,8 @@ impl HollowingDetector {
             // Compare each section
             for disk_section in &disk_sections {
                 // Find corresponding section in memory
-                if let Some(mem_section) = memory_sections
-                    .iter()
-                    .find(|s| s.name == disk_section.name)
+                if let Some(mem_section) =
+                    memory_sections.iter().find(|s| s.name == disk_section.name)
                 {
                     // Read section data from memory
                     let section_addr = base_address + mem_section.virtual_address;
@@ -673,13 +672,12 @@ fn parse_pe_sections(data: &[u8]) -> Result<Vec<PESection>> {
         let is_code = (characteristics & 0x20) != 0;
 
         // Read section data
-        let section_data = if pointer_to_raw_data > 0
-            && pointer_to_raw_data + size_of_raw_data <= data.len()
-        {
-            data[pointer_to_raw_data..pointer_to_raw_data + size_of_raw_data].to_vec()
-        } else {
-            Vec::new()
-        };
+        let section_data =
+            if pointer_to_raw_data > 0 && pointer_to_raw_data + size_of_raw_data <= data.len() {
+                data[pointer_to_raw_data..pointer_to_raw_data + size_of_raw_data].to_vec()
+            } else {
+                Vec::new()
+            };
 
         sections.push(PESection {
             name,

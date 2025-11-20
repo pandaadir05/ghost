@@ -12,7 +12,9 @@
       "Bash(source ~/.zshrc)",
       "Bash(source ~/.cargo/env)",
       "Bash(Select-String \"warning\")",
-      "Bash(Select-Object -First 30)"
+      "Bash(Select-Object -First 30)",
+      "Bash(cargo fmt:*)",
+      "Bash(git config:*)"
     ],
     "deny": [],
     "ask": []

@@ -136,10 +136,9 @@ impl LiveThreatFeeds {
             )));
         }
 
-        let data: serde_json::Value = response
-            .json()
-            .await
-            .map_err(|e| GhostError::ParseError(format!("Failed to parse AbuseIPDB response: {}", e)))?;
+        let data: serde_json::Value = response.json().await.map_err(|e| {
+            GhostError::ParseError(format!("Failed to parse AbuseIPDB response: {}", e))
+        })?;
 
         let mut iocs = Vec::new();
 
@@ -186,7 +185,9 @@ impl LiveThreatFeeds {
             .json(&serde_json::json!({ "query": "get_recent", "selector": "100" }))
             .send()
             .await
-            .map_err(|e| GhostError::NetworkError(format!("MalwareBazaar request failed: {}", e)))?;
+            .map_err(|e| {
+                GhostError::NetworkError(format!("MalwareBazaar request failed: {}", e))
+            })?;
 
         if !response.status().is_success() {
             return Err(GhostError::NetworkError(format!(
@@ -195,10 +196,9 @@ impl LiveThreatFeeds {
             )));
         }
 
-        let data: serde_json::Value = response
-            .json()
-            .await
-            .map_err(|e| GhostError::ParseError(format!("Failed to parse MalwareBazaar response: {}", e)))?;
+        let data: serde_json::Value = response.json().await.map_err(|e| {
+            GhostError::ParseError(format!("Failed to parse MalwareBazaar response: {}", e))
+        })?;
 
         let mut iocs = Vec::new();
 
@@ -257,10 +257,9 @@ impl LiveThreatFeeds {
             )));
         }
 
-        let data: serde_json::Value = response
-            .json()
-            .await
-            .map_err(|e| GhostError::ParseError(format!("Failed to parse AlienVault response: {}", e)))?;
+        let data: serde_json::Value = response.json().await.map_err(|e| {
+            GhostError::ParseError(format!("Failed to parse AlienVault response: {}", e))
+        })?;
 
         let mut iocs = Vec::new();
 

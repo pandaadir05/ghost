@@ -405,8 +405,9 @@ mod platform {
 
                 // Create memory reader closure
                 let memory_reader = |pid: u32, addr: usize, size: usize| -> Result<Vec<u8>> {
-                    let handle = OpenProcess(PROCESS_VM_READ, false, pid)
-                        .map_err(|e| GhostError::MemoryReadError(format!("OpenProcess failed: {}", e)))?;
+                    let handle = OpenProcess(PROCESS_VM_READ, false, pid).map_err(|e| {
+                        GhostError::MemoryReadError(format!("OpenProcess failed: {}", e))
+                    })?;
 
                     let mut buffer = vec![0u8; size];
                     let mut bytes_read = 0usize;
@@ -425,7 +426,9 @@ mod platform {
                         buffer.truncate(bytes_read);
                         Ok(buffer)
                     } else {
-                        Err(GhostError::MemoryReadError("ReadProcessMemory failed".to_string()))
+                        Err(GhostError::MemoryReadError(
+                            "ReadProcessMemory failed".to_string(),
+                        ))
                     }
                 };
 
@@ -465,7 +468,12 @@ mod platform {
                                         module_name: hooked_import.dll_name.clone(),
                                         hooked_function: hooked_import
                                             .function_name
-                                            .unwrap_or_else(|| format!("Ordinal_{}", hooked_import.ordinal.unwrap_or(0))),
+                                            .unwrap_or_else(|| {
+                                                format!(
+                                                    "Ordinal_{}",
+                                                    hooked_import.ordinal.unwrap_or(0)
+                                                )
+                                            }),
                                     });
                                 }
                                 break;

@@ -5,7 +5,6 @@
 ///! - Export Address Table (EAT) extraction
 ///! - Data directory parsing
 ///! - Function address resolution
-
 use crate::{GhostError, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -30,8 +29,8 @@ pub struct ImageImportDescriptor {
     pub original_first_thunk: u32, // RVA to ILT
     pub time_date_stamp: u32,
     pub forwarder_chain: u32,
-    pub name: u32,              // RVA to DLL name
-    pub first_thunk: u32,       // RVA to IAT
+    pub name: u32,        // RVA to DLL name
+    pub first_thunk: u32, // RVA to IAT
 }
 
 /// Export directory structure
@@ -42,13 +41,13 @@ pub struct ImageExportDirectory {
     pub time_date_stamp: u32,
     pub major_version: u16,
     pub minor_version: u16,
-    pub name: u32,                      // RVA to DLL name
-    pub base: u32,                      // Ordinal base
-    pub number_of_functions: u32,       // Number of entries in EAT
-    pub number_of_names: u32,           // Number of entries in name/ordinal tables
-    pub address_of_functions: u32,      // RVA to EAT
-    pub address_of_names: u32,          // RVA to name pointer table
-    pub address_of_name_ordinals: u32,  // RVA to ordinal table
+    pub name: u32,                     // RVA to DLL name
+    pub base: u32,                     // Ordinal base
+    pub number_of_functions: u32,      // Number of entries in EAT
+    pub number_of_names: u32,          // Number of entries in name/ordinal tables
+    pub address_of_functions: u32,     // RVA to EAT
+    pub address_of_names: u32,         // RVA to name pointer table
+    pub address_of_name_ordinals: u32, // RVA to ordinal table
 }
 
 /// Section header structure
@@ -126,7 +125,9 @@ pub fn parse_iat_from_memory(
     // Get import directory RVA
     let import_dir_offset = if is_64bit {
         // 64-bit: skip to data directories (at offset 112 in optional header)
-        opt_header_addr + 112 + (IMAGE_DIRECTORY_ENTRY_IMPORT * mem::size_of::<ImageDataDirectory>())
+        opt_header_addr
+            + 112
+            + (IMAGE_DIRECTORY_ENTRY_IMPORT * mem::size_of::<ImageDataDirectory>())
     } else {
         // 32-bit: skip to data directories (at offset 96 in optional header)
         opt_header_addr + 96 + (IMAGE_DIRECTORY_ENTRY_IMPORT * mem::size_of::<ImageDataDirectory>())
@@ -184,7 +185,11 @@ pub fn parse_iat_from_memory(
             };
 
             // Check if import is by ordinal
-            let ordinal_flag = if is_64bit { 0x8000000000000000u64 } else { 0x80000000u64 };
+            let ordinal_flag = if is_64bit {
+                0x8000000000000000u64
+            } else {
+                0x80000000u64
+            };
             let (function_name, ordinal) = if (thunk_value & ordinal_flag) != 0 {
                 // Import by ordinal
                 (None, Some((thunk_value & 0xFFFF) as u16))
@@ -234,7 +239,10 @@ pub fn detect_iat_hooks(
         .iter()
         .filter_map(|imp| {
             imp.function_name.as_ref().map(|name| {
-                (format!("{}!{}", imp.dll_name.to_lowercase(), name.to_lowercase()), imp.current_address)
+                (
+                    format!("{}!{}", imp.dll_name.to_lowercase(), name.to_lowercase()),
+                    imp.current_address,
+                )
             })
         })
         .collect();
@@ -244,7 +252,11 @@ pub fn detect_iat_hooks(
     // Compare each memory import with disk version
     for import in &mut memory_imports {
         if let Some(func_name) = &import.function_name {
-            let key = format!("{}!{}", import.dll_name.to_lowercase(), func_name.to_lowercase());
+            let key = format!(
+                "{}!{}",
+                import.dll_name.to_lowercase(),
+                func_name.to_lowercase()
+            );
 
             if let Some(&disk_addr) = disk_map.get(&key) {
                 // Check if addresses differ significantly (not just ASLR offset)
@@ -277,14 +289,12 @@ fn parse_iat_from_disk(file_path: &str) -> Result<Vec<ImportEntry>> {
     use std::fs::File;
     use std::io::Read;
 
-    let mut file = File::open(file_path).map_err(|e| {
-        GhostError::ConfigurationError(format!("Failed to open file: {}", e))
-    })?;
+    let mut file = File::open(file_path)
+        .map_err(|e| GhostError::ConfigurationError(format!("Failed to open file: {}", e)))?;
 
     let mut buffer = Vec::new();
-    file.read_to_end(&mut buffer).map_err(|e| {
-        GhostError::ConfigurationError(format!("Failed to read file: {}", e))
-    })?;
+    file.read_to_end(&mut buffer)
+        .map_err(|e| GhostError::ConfigurationError(format!("Failed to read file: {}", e)))?;
 
     parse_iat_from_buffer(&buffer)
 }
@@ -390,8 +400,7 @@ fn read_u64(
 ) -> Result<u64> {
     let bytes = reader(pid, addr, 8)?;
     Ok(u64::from_le_bytes([
-        bytes[0], bytes[1], bytes[2], bytes[3],
-        bytes[4], bytes[5], bytes[6], bytes[7],
+        bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
     ]))
 }
 
