@@ -121,13 +121,6 @@ jobs:
     - name: Run benchmarks
       run: cargo bench --all-features
 
-    - name: Store benchmark result
-      uses: benchmark-action/github-action-benchmark@v1
-      with:
-        tool: 'cargo'
-        output-file-path: target/criterion/benchmark-results.json
-        github-token: ${{ secrets.GITHUB_TOKEN }}
-        auto-push: true
 
   build:
     name: Build Release
