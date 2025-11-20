@@ -21,6 +21,25 @@ pub struct ThreadInfo {
     pub state: ThreadState,
 }
 
+/// Thread hijacking detection result
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ThreadHijackingResult {
+    pub hijacked_threads: Vec<HijackedThreadInfo>,
+    pub suspicious_count: usize,
+}
+
+/// Information about a potentially hijacked thread
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HijackedThreadInfo {
+    pub tid: u32,
+    pub start_address: usize,
+    pub current_ip: usize,
+    pub is_in_rwx_memory: bool,
+    pub is_in_unbacked_memory: bool,
+    pub is_suspended: bool,
+    pub indicators: Vec<String>,
+}
+
 /// Thread execution state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ThreadState {
@@ -205,6 +224,175 @@ mod platform {
         }
 
         Ok(threads)
+    }
+
+    /// Detect thread hijacking by analyzing thread contexts and start addresses
+    pub fn detect_thread_hijacking(
+        pid: u32,
+        memory_regions: &[crate::MemoryRegion],
+    ) -> Result<super::ThreadHijackingResult> {
+        use windows::Win32::System::Diagnostics::Debug::ReadProcessMemory;
+        use windows::Win32::System::Threading::{
+            GetThreadContext, OpenProcess, SuspendThread, ResumeThread,
+            PROCESS_QUERY_INFORMATION, PROCESS_VM_READ, THREAD_GET_CONTEXT, THREAD_SUSPEND_RESUME,
+        };
+
+        let threads = enumerate_threads(pid)?;
+        let mut hijacked_threads = Vec::new();
+
+        unsafe {
+            let process_handle = OpenProcess(
+                PROCESS_QUERY_INFORMATION | PROCESS_VM_READ,
+                false,
+                pid,
+            )
+            .context("Failed to open process for thread analysis")?;
+
+            for thread in threads {
+                let mut indicators = Vec::new();
+                let mut is_in_rwx = false;
+                let mut is_in_unbacked = false;
+                let mut current_ip = thread.start_address;
+
+                // Open thread for context inspection
+                let thread_handle = match OpenThread(
+                    THREAD_GET_CONTEXT | THREAD_SUSPEND_RESUME,
+                    false,
+                    thread.tid,
+                ) {
+                    Ok(h) => h,
+                    Err(_) => continue,
+                };
+
+                // Suspend thread to get consistent context
+                let suspend_count = SuspendThread(thread_handle);
+
+                if suspend_count != u32::MAX {
+                    // Get thread context (registers)
+                    #[cfg(target_arch = "x86_64")]
+                    {
+                        use windows::Win32::System::Diagnostics::Debug::CONTEXT;
+                        use windows::Win32::System::Diagnostics::Debug::CONTEXT_CONTROL;
+
+                        let mut context = CONTEXT {
+                            ContextFlags: CONTEXT_CONTROL,
+                            ..Default::default()
+                        };
+
+                        if GetThreadContext(thread_handle, &mut context).is_ok() {
+                            current_ip = context.Rip as usize;
+
+                            // Check if RIP points to suspicious memory
+                            let region = memory_regions.iter().find(|r| {
+                                current_ip >= r.base_address
+                                    && current_ip < r.base_address + r.size
+                            });
+
+                            if let Some(region) = region {
+                                // Check for RWX memory
+                                if region.protection == crate::MemoryProtection::ReadWriteExecute {
+                                    is_in_rwx = true;
+                                    indicators.push("Thread executing from RWX memory".to_string());
+                                }
+
+                                // Check for private/unbacked memory
+                                if region.region_type == "PRIVATE" {
+                                    is_in_unbacked = true;
+                                    indicators.push("Thread executing from unbacked memory".to_string());
+                                }
+
+                                // Check if start address differs significantly from current IP
+                                if thread.start_address != 0
+                                    && (current_ip < thread.start_address.saturating_sub(0x10000)
+                                        || current_ip > thread.start_address.saturating_add(0x10000))
+                                {
+                                    indicators.push(format!(
+                                        "Thread IP diverged from start address (start: {:#x}, current: {:#x})",
+                                        thread.start_address, current_ip
+                                    ));
+                                }
+                            } else {
+                                indicators.push("Thread IP points to unmapped memory".to_string());
+                            }
+                        }
+                    }
+
+                    #[cfg(target_arch = "x86")]
+                    {
+                        use windows::Win32::System::Diagnostics::Debug::CONTEXT;
+                        use windows::Win32::System::Diagnostics::Debug::CONTEXT_CONTROL;
+
+                        let mut context = CONTEXT {
+                            ContextFlags: CONTEXT_CONTROL,
+                            ..Default::default()
+                        };
+
+                        if GetThreadContext(thread_handle, &mut context).is_ok() {
+                            current_ip = context.Eip as usize;
+
+                            let region = memory_regions.iter().find(|r| {
+                                current_ip >= r.base_address
+                                    && current_ip < r.base_address + r.size
+                            });
+
+                            if let Some(region) = region {
+                                if region.protection == crate::MemoryProtection::ReadWriteExecute {
+                                    is_in_rwx = true;
+                                    indicators.push("Thread executing from RWX memory".to_string());
+                                }
+
+                                if region.region_type == "PRIVATE" {
+                                    is_in_unbacked = true;
+                                    indicators.push("Thread executing from unbacked memory".to_string());
+                                }
+                            } else {
+                                indicators.push("Thread IP points to unmapped memory".to_string());
+                            }
+                        }
+                    }
+
+                    // Resume thread
+                    let _ = ResumeThread(thread_handle);
+                }
+
+                let _ = CloseHandle(thread_handle);
+
+                // Check if start address is suspicious
+                if thread.start_address != 0 {
+                    let start_region = memory_regions.iter().find(|r| {
+                        thread.start_address >= r.base_address
+                            && thread.start_address < r.base_address + r.size
+                    });
+
+                    if let Some(region) = start_region {
+                        if region.region_type == "PRIVATE" && region.protection.is_executable() {
+                            indicators.push("Thread started in private executable memory".to_string());
+                        }
+                    }
+                }
+
+                if !indicators.is_empty() {
+                    hijacked_threads.push(super::HijackedThreadInfo {
+                        tid: thread.tid,
+                        start_address: thread.start_address,
+                        current_ip,
+                        is_in_rwx_memory: is_in_rwx,
+                        is_in_unbacked_memory: is_in_unbacked,
+                        is_suspended: suspend_count > 0 && suspend_count != u32::MAX,
+                        indicators,
+                    });
+                }
+            }
+
+            let _ = CloseHandle(process_handle);
+        }
+
+        let suspicious_count = hijacked_threads.len();
+
+        Ok(super::ThreadHijackingResult {
+            hijacked_threads,
+            suspicious_count,
+        })
     }
 }
 
@@ -470,4 +658,42 @@ mod platform {
 /// Critical for detecting thread hijacking (T1055.003) attacks.
 pub fn enumerate_threads(pid: u32) -> anyhow::Result<Vec<ThreadInfo>> {
     platform::enumerate_threads(pid)
+}
+
+/// Detects thread hijacking by analyzing thread contexts and execution addresses.
+///
+/// # Platform Support
+///
+/// - **Windows**: Full support with context inspection (RIP/EIP analysis)
+/// - **Linux**: Not yet implemented
+/// - **macOS**: Not yet implemented
+///
+/// # Detection Methods
+///
+/// - Thread context inspection (register analysis)
+/// - RIP/EIP points to RWX memory
+/// - Thread executing from unbacked/private memory
+/// - Start address divergence detection
+/// - Suspended thread analysis
+///
+/// # Returns
+///
+/// A `ThreadHijackingResult` with details of potentially hijacked threads.
+#[cfg(windows)]
+pub fn detect_thread_hijacking(
+    pid: u32,
+    memory_regions: &[crate::MemoryRegion],
+) -> anyhow::Result<ThreadHijackingResult> {
+    platform::detect_thread_hijacking(pid, memory_regions)
+}
+
+#[cfg(not(windows))]
+pub fn detect_thread_hijacking(
+    _pid: u32,
+    _memory_regions: &[crate::MemoryRegion],
+) -> anyhow::Result<ThreadHijackingResult> {
+    Ok(ThreadHijackingResult {
+        hijacked_threads: Vec::new(),
+        suspicious_count: 0,
+    })
 }

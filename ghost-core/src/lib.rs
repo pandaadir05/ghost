@@ -106,7 +106,7 @@ pub use streaming::{
     Alert, AlertManager, AlertRule, CorrelationEngine, EventChannel, EventSeverity,
     EventStreamingSystem, EventType, NotificationSystem, StreamingEvent,
 };
-pub use thread::ThreadInfo;
+pub use thread::{detect_thread_hijacking, HijackedThreadInfo, ThreadHijackingResult, ThreadInfo};
 pub use threat_intel::{
     Campaign, IndicatorOfCompromise, IocType, SophisticationLevel, ThreatActor as ThreatIntelActor,
     ThreatContext, ThreatIntelligence,
