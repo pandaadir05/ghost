@@ -206,14 +206,12 @@ pub fn validate_pe_header(pid: u32, base_address: usize) -> anyhow::Result<PEHea
     // Read DOS header
     let dos_header_size = mem::size_of::<ImageDosHeader>();
     let dos_header_bytes = read_process_memory(pid, base_address, dos_header_size)?;
-    
+
     if dos_header_bytes.len() < dos_header_size {
         return Ok(PEHeaderValidation::CorruptedHeader);
     }
 
-    let dos_header = unsafe {
-        std::ptr::read(dos_header_bytes.as_ptr() as *const ImageDosHeader)
-    };
+    let dos_header = unsafe { std::ptr::read(dos_header_bytes.as_ptr() as *const ImageDosHeader) };
 
     // Validate DOS signature
     if dos_header.e_magic != IMAGE_DOS_SIGNATURE {
@@ -227,7 +225,7 @@ pub fn validate_pe_header(pid: u32, base_address: usize) -> anyhow::Result<PEHea
 
     // Read NT headers
     let nt_header_address = base_address.wrapping_add(dos_header.e_lfanew as usize);
-    
+
     // Read NT signature (4 bytes)
     let nt_sig_bytes = read_process_memory(pid, nt_header_address, 4)?;
     if nt_sig_bytes.len() < 4 {
@@ -249,27 +247,26 @@ pub fn validate_pe_header(pid: u32, base_address: usize) -> anyhow::Result<PEHea
     let file_header_address = nt_header_address + 4;
     let file_header_size = mem::size_of::<ImageFileHeader>();
     let file_header_bytes = read_process_memory(pid, file_header_address, file_header_size)?;
-    
+
     if file_header_bytes.len() < file_header_size {
         return Ok(PEHeaderValidation::CorruptedHeader);
     }
 
-    let file_header = unsafe {
-        std::ptr::read(file_header_bytes.as_ptr() as *const ImageFileHeader)
-    };
+    let file_header =
+        unsafe { std::ptr::read(file_header_bytes.as_ptr() as *const ImageFileHeader) };
 
     // Read optional header (64-bit)
     let optional_header_address = file_header_address + file_header_size;
     let optional_header_size = mem::size_of::<ImageOptionalHeader64>();
-    let optional_header_bytes = read_process_memory(pid, optional_header_address, optional_header_size)?;
-    
+    let optional_header_bytes =
+        read_process_memory(pid, optional_header_address, optional_header_size)?;
+
     if optional_header_bytes.len() < optional_header_size {
         return Ok(PEHeaderValidation::CorruptedHeader);
     }
 
-    let optional_header = unsafe {
-        std::ptr::read(optional_header_bytes.as_ptr() as *const ImageOptionalHeader64)
-    };
+    let optional_header =
+        unsafe { std::ptr::read(optional_header_bytes.as_ptr() as *const ImageOptionalHeader64) };
 
     // Validate image base matches memory address
     if optional_header.image_base != base_address as u64 {
@@ -303,14 +300,12 @@ pub fn read_pe_header_info(pid: u32, base_address: usize) -> anyhow::Result<Opti
 
     let dos_header_size = mem::size_of::<ImageDosHeader>();
     let dos_header_bytes = read_process_memory(pid, base_address, dos_header_size)?;
-    
+
     if dos_header_bytes.len() < dos_header_size {
         return Ok(None);
     }
 
-    let dos_header = unsafe {
-        std::ptr::read(dos_header_bytes.as_ptr() as *const ImageDosHeader)
-    };
+    let dos_header = unsafe { std::ptr::read(dos_header_bytes.as_ptr() as *const ImageDosHeader) };
 
     if dos_header.e_magic != IMAGE_DOS_SIGNATURE {
         return Ok(None);
@@ -321,7 +316,7 @@ pub fn read_pe_header_info(pid: u32, base_address: usize) -> anyhow::Result<Opti
     }
 
     let nt_header_address = base_address.wrapping_add(dos_header.e_lfanew as usize);
-    
+
     // Read NT signature
     let nt_sig_bytes = read_process_memory(pid, nt_header_address, 4)?;
     if nt_sig_bytes.len() < 4 {
@@ -343,27 +338,26 @@ pub fn read_pe_header_info(pid: u32, base_address: usize) -> anyhow::Result<Opti
     let file_header_address = nt_header_address + 4;
     let file_header_size = mem::size_of::<ImageFileHeader>();
     let file_header_bytes = read_process_memory(pid, file_header_address, file_header_size)?;
-    
+
     if file_header_bytes.len() < file_header_size {
         return Ok(None);
     }
 
-    let file_header = unsafe {
-        std::ptr::read(file_header_bytes.as_ptr() as *const ImageFileHeader)
-    };
+    let file_header =
+        unsafe { std::ptr::read(file_header_bytes.as_ptr() as *const ImageFileHeader) };
 
     // Read optional header
     let optional_header_address = file_header_address + file_header_size;
     let optional_header_size = mem::size_of::<ImageOptionalHeader64>();
-    let optional_header_bytes = read_process_memory(pid, optional_header_address, optional_header_size)?;
-    
+    let optional_header_bytes =
+        read_process_memory(pid, optional_header_address, optional_header_size)?;
+
     if optional_header_bytes.len() < optional_header_size {
         return Ok(None);
     }
 
-    let optional_header = unsafe {
-        std::ptr::read(optional_header_bytes.as_ptr() as *const ImageOptionalHeader64)
-    };
+    let optional_header =
+        unsafe { std::ptr::read(optional_header_bytes.as_ptr() as *const ImageOptionalHeader64) };
 
     Ok(Some(PEHeaderInfo {
         dos_signature: dos_header.e_magic,
@@ -391,7 +385,10 @@ pub struct PEHeaderInfo {
 }
 
 #[cfg(not(windows))]
-pub fn read_pe_header_info(_pid: u32, _base_address: usize) -> anyhow::Result<Option<PEHeaderInfo>> {
+pub fn read_pe_header_info(
+    _pid: u32,
+    _base_address: usize,
+) -> anyhow::Result<Option<PEHeaderInfo>> {
     Ok(None)
 }
 
@@ -535,8 +532,8 @@ mod platform {
 
     pub fn enumerate_memory_regions(pid: u32) -> Result<Vec<MemoryRegion>> {
         let maps_path = format!("/proc/{}/maps", pid);
-        let content = fs::read_to_string(&maps_path)
-            .context(format!("Failed to read {}", maps_path))?;
+        let content =
+            fs::read_to_string(&maps_path).context(format!("Failed to read {}", maps_path))?;
 
         let mut regions = Vec::new();
 
@@ -612,8 +609,7 @@ mod platform {
 
     pub fn read_process_memory(pid: u32, address: usize, size: usize) -> Result<Vec<u8>> {
         let mem_path = format!("/proc/{}/mem", pid);
-        let mut file = fs::File::open(&mem_path)
-            .context(format!("Failed to open {}", mem_path))?;
+        let mut file = fs::File::open(&mem_path).context(format!("Failed to open {}", mem_path))?;
 
         use std::io::{Read, Seek, SeekFrom};
         file.seek(SeekFrom::Start(address as u64))
@@ -630,20 +626,194 @@ mod platform {
 #[cfg(target_os = "macos")]
 mod platform {
     use super::{MemoryProtection, MemoryRegion};
-    use anyhow::Result;
+    use anyhow::{Context, Result};
+    use libc::{c_int, pid_t, size_t};
+    use std::ptr;
 
-    // TODO: macOS implementation requires vm_region_basic_info_64 which is not available
-    // in all libc versions. This is a stub implementation.
-    pub fn enumerate_memory_regions(_pid: u32) -> Result<Vec<MemoryRegion>> {
-        Err(anyhow::anyhow!(
-            "macOS memory enumeration not yet fully implemented for this platform"
-        ))
+    // Mach types and constants
+    type mach_port_t = u32;
+    type vm_address_t = usize;
+    type vm_size_t = usize;
+    type vm_prot_t = c_int;
+    type kern_return_t = c_int;
+
+    const KERN_SUCCESS: kern_return_t = 0;
+    const VM_PROT_READ: vm_prot_t = 0x01;
+    const VM_PROT_WRITE: vm_prot_t = 0x02;
+    const VM_PROT_EXECUTE: vm_prot_t = 0x04;
+
+    // External mach functions
+    extern "C" {
+        fn task_for_pid(
+            target_tport: mach_port_t,
+            pid: pid_t,
+            t: *mut mach_port_t,
+        ) -> kern_return_t;
+
+        fn mach_task_self() -> mach_port_t;
+
+        fn mach_vm_read_overwrite(
+            target_task: mach_port_t,
+            address: vm_address_t,
+            size: vm_size_t,
+            data: vm_address_t,
+            out_size: *mut vm_size_t,
+        ) -> kern_return_t;
     }
 
-    pub fn read_process_memory(_pid: u32, _address: usize, _size: usize) -> Result<Vec<u8>> {
-        Err(anyhow::anyhow!(
-            "macOS memory reading not yet fully implemented for this platform"
-        ))
+    pub fn enumerate_memory_regions(pid: u32) -> Result<Vec<MemoryRegion>> {
+        use libc::{c_int, mach_msg_type_number_t};
+
+        // Mach VM structures and constants
+        const VM_REGION_BASIC_INFO_64: c_int = 9;
+        const VM_REGION_BASIC_INFO_COUNT_64: mach_msg_type_number_t = 9;
+
+        #[repr(C)]
+        #[derive(Copy, Clone)]
+        struct vm_region_basic_info_64 {
+            protection: c_int,
+            max_protection: c_int,
+            inheritance: c_int,
+            shared: c_int,
+            reserved: c_int,
+            offset: u64,
+            behavior: c_int,
+            user_wired_count: u16,
+        }
+
+        extern "C" {
+            fn task_for_pid(
+                target_tport: mach_port_t,
+                pid: libc::pid_t,
+                t: *mut mach_port_t,
+            ) -> kern_return_t;
+
+            fn mach_task_self() -> mach_port_t;
+
+            fn mach_vm_region(
+                target_task: mach_port_t,
+                address: *mut vm_address_t,
+                size: *mut vm_size_t,
+                flavor: c_int,
+                info: *mut c_int,
+                info_count: *mut mach_msg_type_number_t,
+                object_name: *mut mach_port_t,
+            ) -> kern_return_t;
+        }
+
+        unsafe {
+            let mut task: mach_port_t = 0;
+            let kr = task_for_pid(mach_task_self(), pid as libc::pid_t, &mut task);
+
+            if kr != KERN_SUCCESS {
+                return Err(anyhow::anyhow!(
+                    "Failed to get task port for pid {}. Requires sudo or proper entitlements. Error: {}",
+                    pid,
+                    kr
+                ));
+            }
+
+            let mut regions = Vec::new();
+            let mut address: vm_address_t = 0;
+
+            loop {
+                let mut size: vm_size_t = 0;
+                let mut info: vm_region_basic_info_64 = std::mem::zeroed();
+                let mut info_count = VM_REGION_BASIC_INFO_COUNT_64;
+                let mut object_name: mach_port_t = 0;
+
+                let kr = mach_vm_region(
+                    task,
+                    &mut address,
+                    &mut size,
+                    VM_REGION_BASIC_INFO_64,
+                    &mut info as *mut _ as *mut c_int,
+                    &mut info_count,
+                    &mut object_name,
+                );
+
+                // End of memory space
+                if kr != KERN_SUCCESS {
+                    break;
+                }
+
+                // Convert mach protection to our MemoryProtection enum
+                let protection = match info.protection {
+                    0 => MemoryProtection::NoAccess,
+                    1 => MemoryProtection::ReadOnly,
+                    2 => MemoryProtection::ReadWrite,  // Write implies read on most systems
+                    3 => MemoryProtection::ReadWrite,
+                    4 => MemoryProtection::Execute,
+                    5 => MemoryProtection::ReadExecute,
+                    6 => MemoryProtection::ReadWriteExecute,  // WX -> RWX
+                    7 => MemoryProtection::ReadWriteExecute,
+                    _ => MemoryProtection::NoAccess,
+                };
+
+                // Determine region type based on protection and shared status
+                let region_type = if info.shared != 0 {
+                    "SHARED".to_string()
+                } else if info.protection & 4 != 0 {
+                    // Executable regions are likely IMAGE
+                    "IMAGE".to_string()
+                } else {
+                    "PRIVATE".to_string()
+                };
+
+                regions.push(MemoryRegion {
+                    base_address: address,
+                    size,
+                    protection,
+                    region_type,
+                });
+
+                // Move to next region
+                address += size;
+            }
+
+            Ok(regions)
+        }
+    }
+
+    pub fn read_process_memory(pid: u32, address: usize, size: usize) -> Result<Vec<u8>> {
+        unsafe {
+            // Get task port for the target process
+            let mut task: mach_port_t = 0;
+            let kr = task_for_pid(mach_task_self(), pid as pid_t, &mut task);
+
+            if kr != KERN_SUCCESS {
+                return Err(anyhow::anyhow!(
+                    "Failed to get task port for pid {}. Make sure to run with sudo or have proper entitlements. Error code: {}",
+                    pid,
+                    kr
+                ));
+            }
+
+            // Allocate buffer for reading
+            let mut buffer = vec![0u8; size];
+            let mut out_size: vm_size_t = 0;
+
+            // Read memory from target process
+            let kr = mach_vm_read_overwrite(
+                task,
+                address as vm_address_t,
+                size as vm_size_t,
+                buffer.as_mut_ptr() as vm_address_t,
+                &mut out_size,
+            );
+
+            if kr != KERN_SUCCESS {
+                return Err(anyhow::anyhow!(
+                    "Failed to read process memory at address {:#x}. Error code: {}",
+                    address,
+                    kr
+                ));
+            }
+
+            // Truncate to actual bytes read
+            buffer.truncate(out_size);
+            Ok(buffer)
+        }
     }
 }
 
