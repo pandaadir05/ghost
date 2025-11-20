@@ -13,13 +13,15 @@ fn main() -> Result<()> {
     let matches = Command::new("ghost")
         .version(env!("CARGO_PKG_VERSION"))
         .about("Cross-Platform Process Injection Detection Framework")
-        .long_about("Ghost scans running processes for signs of code injection, \
+        .long_about(
+            "Ghost scans running processes for signs of code injection, \
                      process hollowing, and other malicious techniques. \
                      Supports Windows and Linux platforms with kernel-level monitoring.\n\n\
                      Exit Codes:\n\
                      0 - No suspicious activity detected\n\
                      1 - Suspicious processes found\n\
-                     2 - Error occurred during scanning")
+                     2 - Error occurred during scanning",
+        )
         .arg(
             Arg::new("format")
                 .short('f')
@@ -27,34 +29,34 @@ fn main() -> Result<()> {
                 .value_name("FORMAT")
                 .help("Output format: table, json")
                 .default_value("table")
-                .value_parser(["table", "json", "csv"])
+                .value_parser(["table", "json", "csv"]),
         )
         .arg(
             Arg::new("verbose")
                 .short('v')
                 .long("verbose")
                 .help("Enable verbose output")
-                .action(clap::ArgAction::SetTrue)
+                .action(clap::ArgAction::SetTrue),
         )
         .arg(
             Arg::new("pid")
                 .short('p')
                 .long("pid")
                 .value_name("PID")
-                .help("Target specific process ID")
+                .help("Target specific process ID"),
         )
         .arg(
             Arg::new("process")
                 .long("process")
                 .value_name("NAME")
-                .help("Target specific process name")
+                .help("Target specific process name"),
         )
         .arg(
             Arg::new("output")
                 .short('o')
                 .long("output")
                 .value_name("FILE")
-                                .help("Write output to file instead of stdout"),
+                .help("Write output to file instead of stdout"),
         )
         .arg(
             Arg::new("debug")
@@ -147,22 +149,25 @@ fn main() -> Result<()> {
            format, verbose, quiet, target_pid, target_process, config_file);
 
     if !quiet {
-        println!("Ghost v{} - Process Injection Detection\n", env!("CARGO_PKG_VERSION"));
+        println!(
+            "Ghost v{} - Process Injection Detection\n",
+            env!("CARGO_PKG_VERSION")
+        );
     }
 
-    let scan_start = Instant::now();
+    let _scan_start = Instant::now();
     let mut engine = DetectionEngine::with_config(config).map_err(|e| {
         error!("Failed to initialize detection engine: {}", e);
         anyhow::anyhow!("Detection engine initialization failed: {}", e)
     })?;
-    
+
     // Display MITRE ATT&CK statistics if requested
     if mitre_stats {
         if !quiet {
             println!("MITRE ATT&CK Framework Statistics:");
             println!("==================================");
         }
-        
+
         let (techniques, tactics, actors) = engine.get_mitre_stats();
         if !quiet {
             println!("Techniques: {}", techniques);
@@ -177,26 +182,23 @@ fn main() -> Result<()> {
             println!("  - APT29 (Cozy Bear)");
             println!();
         }
-        
+
         // If only showing stats, exit here
         if mitre_stats && target_pid.is_none() && target_process.is_none() {
             return Ok(());
         }
     }
-    
+
     let processes = if let Some(pid_str) = target_pid {
         let pid: u32 = pid_str.parse().map_err(|e| {
             error!("Invalid PID format '{}': {}", pid_str, e);
             anyhow::anyhow!("Invalid PID format: {}", pid_str)
         })?;
         info!("Targeting specific process ID: {}", pid);
-        
+
         let all_processes = process::enumerate_processes()?;
-        let filtered: Vec<_> = all_processes
-            .into_iter()
-            .filter(|p| p.pid == pid)
-            .collect();
-        
+        let filtered: Vec<_> = all_processes.into_iter().filter(|p| p.pid == pid).collect();
+
         if filtered.is_empty() {
             warn!("No process found with PID {}", pid);
             if !quiet {
@@ -213,20 +215,36 @@ fn main() -> Result<()> {
             .into_iter()
             .filter(|p| p.name.to_lowercase().contains(&process_name.to_lowercase()))
             .collect();
-        
+
         if filtered.is_empty() {
             warn!("No processes found matching name: {}", process_name);
             if !quiet {
-                println!("Warning: No processes found matching name: {}", process_name);
+                println!(
+                    "Warning: No processes found matching name: {}",
+                    process_name
+                );
             }
         } else {
-            info!("Found {} processes matching name: {}", filtered.len(), process_name);
-            debug!("Matching processes: {:?}", filtered.iter().map(|p| format!("{} ({})", p.name, p.pid)).collect::<Vec<_>>());
+            info!(
+                "Found {} processes matching name: {}",
+                filtered.len(),
+                process_name
+            );
+            debug!(
+                "Matching processes: {:?}",
+                filtered
+                    .iter()
+                    .map(|p| format!("{} ({})", p.name, p.pid))
+                    .collect::<Vec<_>>()
+            );
         }
         filtered
     } else {
         let all_processes = process::enumerate_processes()?;
-        info!("Enumerating all processes, found {} total", all_processes.len());
+        info!(
+            "Enumerating all processes, found {} total",
+            all_processes.len()
+        );
         all_processes
     };
 
@@ -244,19 +262,26 @@ fn main() -> Result<()> {
             debug!("Skipping safe system process: {}", proc.name);
             continue;
         }
-        
+
         scanned_count += 1;
         debug!("Scanning process: {} (PID: {})", proc.name, proc.pid);
-        
+
         match memory::enumerate_memory_regions(proc.pid) {
             Ok(regions) => {
-                debug!("Found {} memory regions for process {}", regions.len(), proc.name);
+                debug!(
+                    "Found {} memory regions for process {}",
+                    regions.len(),
+                    proc.name
+                );
                 // Get thread information if available
                 let threads = thread::enumerate_threads(proc.pid).ok();
                 let result = engine.analyze_process(proc, &regions, threads.as_deref());
 
                 if result.threat_level != ThreatLevel::Clean {
-                    warn!("Suspicious activity detected in process {} (PID: {})", proc.name, proc.pid);
+                    warn!(
+                        "Suspicious activity detected in process {} (PID: {})",
+                        proc.name, proc.pid
+                    );
                     detections.push(result);
                 } else {
                     debug!("Process {} (PID: {}) is clean", proc.name, proc.pid);
@@ -264,9 +289,15 @@ fn main() -> Result<()> {
             }
             Err(e) => {
                 error_count += 1;
-                error!("Failed to scan process {} (PID: {}): {}", proc.name, proc.pid, e);
+                error!(
+                    "Failed to scan process {} (PID: {}): {}",
+                    proc.name, proc.pid, e
+                );
                 if verbose && !quiet {
-                    println!("Warning: Could not scan process {} (PID: {})", proc.name, proc.pid);
+                    println!(
+                        "Warning: Could not scan process {} (PID: {})",
+                        proc.name, proc.pid
+                    );
                 }
             }
         }
@@ -277,7 +308,11 @@ fn main() -> Result<()> {
         println!("Scan completed with {} access errors", error_count);
     }
 
-    info!("Scan completed: {} processes scanned, {} suspicious processes found", scanned_count, detections.len());
+    info!(
+        "Scan completed: {} processes scanned, {} suspicious processes found",
+        scanned_count,
+        detections.len()
+    );
 
     // Handle output
     let output_content = match format.as_str() {
@@ -287,13 +322,15 @@ fn main() -> Result<()> {
                     "status": "clean",
                     "message": "No suspicious activity detected",
                     "detections": []
-                }).to_string()
+                })
+                .to_string()
             } else {
                 serde_json::json!({
-                    "status": "suspicious", 
+                    "status": "suspicious",
                     "message": format!("Found {} suspicious processes", detections.len()),
                     "detections": &detections
-                }).to_string()
+                })
+                .to_string()
             }
         }
         _ => {
@@ -331,7 +368,7 @@ fn main() -> Result<()> {
     if let Some(output_path) = output_file {
         use std::fs::File;
         use std::io::Write;
-        
+
         info!("Writing results to file: {}", output_path);
         let mut file = File::create(output_path)?;
         file.write_all(output_content.as_bytes())?;
@@ -347,11 +384,11 @@ fn main() -> Result<()> {
 
     // Exit with appropriate code for automation
     let exit_code = if error_count > 0 {
-        2  // Error occurred during scanning
+        2 // Error occurred during scanning
     } else if !detections.is_empty() {
-        1  // Suspicious processes found
+        1 // Suspicious processes found
     } else {
-        0  // Clean scan
+        0 // Clean scan
     };
 
     debug!("Exiting with code: {}", exit_code);
