@@ -586,24 +586,24 @@ fn parse_pe_sections(data: &[u8]) -> Result<Vec<PESection>> {
     use crate::GhostError;
 
     if data.len() < 0x40 {
-        return Err(GhostError::ParseError("Buffer too small".to_string()));
+        return Err(GhostError::InvalidInput { message: "Buffer too small".to_string() });
     }
 
     // Check DOS signature
     if &data[0..2] != b"MZ" {
-        return Err(GhostError::ParseError("Invalid DOS signature".to_string()));
+        return Err(GhostError::InvalidInput { message: "Invalid DOS signature".to_string() });
     }
 
     // Get PE offset
     let pe_offset = u32::from_le_bytes([data[0x3c], data[0x3d], data[0x3e], data[0x3f]]) as usize;
 
     if pe_offset + 0x18 >= data.len() {
-        return Err(GhostError::ParseError("Invalid PE offset".to_string()));
+        return Err(GhostError::InvalidInput { message: "Invalid PE offset".to_string() });
     }
 
     // Check PE signature
     if &data[pe_offset..pe_offset + 4] != b"PE\0\0" {
-        return Err(GhostError::ParseError("Invalid PE signature".to_string()));
+        return Err(GhostError::InvalidInput { message: "Invalid PE signature".to_string() });
     }
 
     // Parse COFF header

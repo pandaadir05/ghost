@@ -73,12 +73,11 @@ impl LiveThreatFeeds {
     pub async fn update_feeds(&mut self) -> Result<usize, GhostError> {
         let mut updated_count = 0;
 
-        for feed in &mut self.feeds {
-            if !feed.enabled {
-                continue;
-            }
+        // Clone feeds to avoid borrow checker issues
+        let feeds: Vec<ThreatFeed> = self.feeds.iter().filter(|f| f.enabled).cloned().collect();
 
-            match self.fetch_feed_data(feed).await {
+        for feed in feeds {
+            match self.fetch_feed_data(&feed).await {
                 Ok(iocs) => {
                     log::info!("Updated {} with {} IOCs", feed.name, iocs.len());
 
@@ -87,7 +86,10 @@ impl LiveThreatFeeds {
                         self.ioc_cache.insert(ioc.value.clone(), ioc);
                     }
 
-                    feed.last_updated = SystemTime::now();
+                    // Update feed's last_updated time
+                    if let Some(f) = self.feeds.iter_mut().find(|f| f.name == feed.name) {
+                        f.last_updated = SystemTime::now();
+                    }
                     updated_count += 1;
                 }
                 Err(e) => {
@@ -114,7 +116,7 @@ impl LiveThreatFeeds {
 
     async fn fetch_abuseipdb(&self, feed: &ThreatFeed) -> Result<Vec<CachedIOC>, GhostError> {
         let api_key = feed.api_key.as_ref().ok_or_else(|| {
-            GhostError::ConfigurationError("AbuseIPDB requires API key".to_string())
+            GhostError::Configuration { message: "AbuseIPDB requires API key".to_string() }
         })?;
 
         let client = reqwest::Client::new();
@@ -127,17 +129,17 @@ impl LiveThreatFeeds {
             .query(&[("confidenceMinimum", "90")])
             .send()
             .await
-            .map_err(|e| GhostError::NetworkError(format!("AbuseIPDB request failed: {}", e)))?;
+            .map_err(|e| GhostError::ThreatIntel { message: format!("AbuseIPDB request failed: {}", e) })?;
 
         if !response.status().is_success() {
-            return Err(GhostError::NetworkError(format!(
+            return Err(GhostError::ThreatIntel { message: format!(
                 "AbuseIPDB API returned status: {}",
                 response.status()
-            )));
+            ) });
         }
 
         let data: serde_json::Value = response.json().await.map_err(|e| {
-            GhostError::ParseError(format!("Failed to parse AbuseIPDB response: {}", e))
+            GhostError::Serialization { message: format!("Failed to parse AbuseIPDB response: {}", e) }
         })?;
 
         let mut iocs = Vec::new();
@@ -186,18 +188,18 @@ impl LiveThreatFeeds {
             .send()
             .await
             .map_err(|e| {
-                GhostError::NetworkError(format!("MalwareBazaar request failed: {}", e))
+                GhostError::ThreatIntel { message: format!("MalwareBazaar request failed: {}", e) }
             })?;
 
         if !response.status().is_success() {
-            return Err(GhostError::NetworkError(format!(
+            return Err(GhostError::ThreatIntel { message: format!(
                 "MalwareBazaar API returned status: {}",
                 response.status()
-            )));
+            ) });
         }
 
         let data: serde_json::Value = response.json().await.map_err(|e| {
-            GhostError::ParseError(format!("Failed to parse MalwareBazaar response: {}", e))
+            GhostError::Serialization { message: format!("Failed to parse MalwareBazaar response: {}", e) }
         })?;
 
         let mut iocs = Vec::new();
@@ -235,7 +237,7 @@ impl LiveThreatFeeds {
 
     async fn fetch_alienvault(&self, feed: &ThreatFeed) -> Result<Vec<CachedIOC>, GhostError> {
         let api_key = feed.api_key.as_ref().ok_or_else(|| {
-            GhostError::ConfigurationError("AlienVault OTX requires API key".to_string())
+            GhostError::Configuration { message: "AlienVault OTX requires API key".to_string() }
         })?;
 
         let client = reqwest::Client::new();
@@ -248,17 +250,17 @@ impl LiveThreatFeeds {
             .query(&[("limit", "50")])
             .send()
             .await
-            .map_err(|e| GhostError::NetworkError(format!("AlienVault request failed: {}", e)))?;
+            .map_err(|e| GhostError::ThreatIntel { message: format!("AlienVault request failed: {}", e) })?;
 
         if !response.status().is_success() {
-            return Err(GhostError::NetworkError(format!(
+            return Err(GhostError::ThreatIntel { message: format!(
                 "AlienVault API returned status: {}",
                 response.status()
-            )));
+            ) });
         }
 
         let data: serde_json::Value = response.json().await.map_err(|e| {
-            GhostError::ParseError(format!("Failed to parse AlienVault response: {}", e))
+            GhostError::Serialization { message: format!("Failed to parse AlienVault response: {}", e) }
         })?;
 
         let mut iocs = Vec::new();

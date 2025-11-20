@@ -14,7 +14,17 @@
       "Bash(Select-String \"warning\")",
       "Bash(Select-Object -First 30)",
       "Bash(cargo fmt:*)",
-      "Bash(git config:*)"
+      "Bash(git config:*)",
+      "Bash(git push:*)",
+      "Bash(rustc:*)",
+      "Bash(cargo --version:*)",
+      "Bash(rustup install:*)",
+      "Bash(rustup override set:*)",
+      "Bash(cargo generate-lockfile:*)",
+      "Bash(rustup override unset:*)",
+      "Bash(Select-String -Pattern \"Checking|Finished|error\")",
+      "Bash(Select-Object -First 20)",
+      "Bash(git restore:*)"
     ],
     "deny": [],
     "ask": []
