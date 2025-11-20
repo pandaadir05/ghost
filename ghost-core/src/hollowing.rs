@@ -34,6 +34,17 @@ pub enum HollowingIndicator {
         gap_count: usize,
         largest_gap: usize,
     },
+    SectionHashMismatch {
+        section_name: String,
+        expected_hash: String,
+        actual_hash: String,
+    },
+    ModifiedCodeSection {
+        section_name: String,
+        modification_percentage: f32,
+    },
+    ImportTableMismatch,
+    ExportTableCorrupted,
 }
 
 impl std::fmt::Display for HollowingIndicator {
@@ -70,6 +81,33 @@ impl std::fmt::Display for HollowingIndicator {
                     "{} memory gaps detected, largest: {:#x} bytes",
                     gap_count, largest_gap
                 )
+            }
+            Self::SectionHashMismatch {
+                section_name,
+                expected_hash,
+                actual_hash,
+            } => {
+                write!(
+                    f,
+                    "Section '{}' hash mismatch - expected: {}, actual: {}",
+                    section_name, expected_hash, actual_hash
+                )
+            }
+            Self::ModifiedCodeSection {
+                section_name,
+                modification_percentage,
+            } => {
+                write!(
+                    f,
+                    "Section '{}' modified ({:.1}% different from disk)",
+                    section_name, modification_percentage
+                )
+            }
+            Self::ImportTableMismatch => {
+                write!(f, "Import table differs from disk version")
+            }
+            Self::ExportTableCorrupted => {
+                write!(f, "Export table is corrupted or invalid")
             }
         }
     }
@@ -127,6 +165,13 @@ impl HollowingDetector {
         if let Some(indicator) = self.check_entry_point_anomalies(process, memory_regions) {
             indicators.push(indicator);
             confidence += 0.5;
+        }
+
+        // Deep PE comparison with section hashing (Windows only)
+        if let Some(mut deep_indicators) = self.deep_pe_comparison(process) {
+            let indicator_count = deep_indicators.len() as f32;
+            confidence += 0.9 * (indicator_count / 3.0).min(1.0);
+            indicators.append(&mut deep_indicators);
         }
 
         if !indicators.is_empty() {
@@ -377,6 +422,275 @@ impl HollowingDetector {
 
         None
     }
+
+    /// Deep PE comparison with section hashing
+    #[cfg(windows)]
+    fn deep_pe_comparison(&self, process: &ProcessInfo) -> Option<Vec<HollowingIndicator>> {
+        use sha2::{Digest, Sha256};
+        use std::fs::File;
+        use std::io::Read;
+        use windows::Win32::Foundation::CloseHandle;
+        use windows::Win32::System::Diagnostics::Debug::ReadProcessMemory;
+        use windows::Win32::System::Threading::{OpenProcess, PROCESS_VM_READ};
+
+        let mut indicators = Vec::new();
+
+        // Get the path to the executable on disk
+        let disk_path = match &process.path {
+            Some(path) => path,
+            None => return None,
+        };
+
+        // Read PE from disk
+        let mut disk_file = match File::open(disk_path) {
+            Ok(f) => f,
+            Err(_) => return None,
+        };
+
+        let mut disk_data = Vec::new();
+        if disk_file.read_to_end(&mut disk_data).is_err() {
+            return None;
+        }
+
+        // Parse PE sections from disk
+        let disk_sections = match parse_pe_sections(&disk_data) {
+            Ok(sections) => sections,
+            Err(_) => return None,
+        };
+
+        // Read process memory
+        unsafe {
+            let handle = match OpenProcess(PROCESS_VM_READ, false, process.pid) {
+                Ok(h) => h,
+                Err(_) => return None,
+            };
+
+            // Assume base address (in real implementation, would enumerate modules)
+            let base_address = 0x400000usize;
+
+            // Read PE header from memory to get actual base
+            let mut header_buf = vec![0u8; 0x1000];
+            let mut bytes_read = 0usize;
+
+            if ReadProcessMemory(
+                handle,
+                base_address as *const _,
+                header_buf.as_mut_ptr() as *mut _,
+                header_buf.len(),
+                Some(&mut bytes_read),
+            )
+            .is_err()
+            {
+                let _ = CloseHandle(handle);
+                return None;
+            }
+
+            // Parse sections from memory
+            let memory_sections = match parse_pe_sections(&header_buf) {
+                Ok(sections) => sections,
+                Err(_) => {
+                    let _ = CloseHandle(handle);
+                    return None;
+                }
+            };
+
+            // Compare each section
+            for disk_section in &disk_sections {
+                // Find corresponding section in memory
+                if let Some(mem_section) = memory_sections
+                    .iter()
+                    .find(|s| s.name == disk_section.name)
+                {
+                    // Read section data from memory
+                    let section_addr = base_address + mem_section.virtual_address;
+                    let mut section_data = vec![0u8; mem_section.size];
+                    let mut section_bytes_read = 0usize;
+
+                    if ReadProcessMemory(
+                        handle,
+                        section_addr as *const _,
+                        section_data.as_mut_ptr() as *mut _,
+                        section_data.len(),
+                        Some(&mut section_bytes_read),
+                    )
+                    .is_ok()
+                        && section_bytes_read > 0
+                    {
+                        section_data.truncate(section_bytes_read);
+
+                        // Compare hashes for code sections
+                        if disk_section.is_code {
+                            let disk_hash = Sha256::digest(&disk_section.data);
+                            let memory_hash = Sha256::digest(&section_data);
+
+                            if disk_hash != memory_hash {
+                                // Calculate percentage difference
+                                let different_bytes = disk_section
+                                    .data
+                                    .iter()
+                                    .zip(section_data.iter())
+                                    .filter(|(a, b)| a != b)
+                                    .count();
+                                let total_bytes = disk_section.data.len().min(section_data.len());
+                                let modification_percentage =
+                                    (different_bytes as f32 / total_bytes as f32) * 100.0;
+
+                                if modification_percentage > 5.0 {
+                                    // More than 5% modified
+                                    indicators.push(HollowingIndicator::ModifiedCodeSection {
+                                        section_name: disk_section.name.clone(),
+                                        modification_percentage,
+                                    });
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    // Section exists in disk but not in memory - suspicious
+                    if disk_section.is_code {
+                        indicators.push(HollowingIndicator::CorruptedPEStructure {
+                            address: base_address,
+                            reason: format!("Missing section: {}", disk_section.name),
+                        });
+                    }
+                }
+            }
+
+            let _ = CloseHandle(handle);
+        }
+
+        if indicators.is_empty() {
+            None
+        } else {
+            Some(indicators)
+        }
+    }
+
+    #[cfg(not(windows))]
+    fn deep_pe_comparison(&self, _process: &ProcessInfo) -> Option<Vec<HollowingIndicator>> {
+        None
+    }
+}
+
+/// PE section information for comparison
+#[derive(Debug, Clone)]
+struct PESection {
+    name: String,
+    virtual_address: usize,
+    size: usize,
+    is_code: bool,
+    data: Vec<u8>,
+}
+
+/// Parse PE sections from a buffer
+fn parse_pe_sections(data: &[u8]) -> Result<Vec<PESection>> {
+    use crate::GhostError;
+
+    if data.len() < 0x40 {
+        return Err(GhostError::ParseError("Buffer too small".to_string()));
+    }
+
+    // Check DOS signature
+    if &data[0..2] != b"MZ" {
+        return Err(GhostError::ParseError("Invalid DOS signature".to_string()));
+    }
+
+    // Get PE offset
+    let pe_offset = u32::from_le_bytes([data[0x3c], data[0x3d], data[0x3e], data[0x3f]]) as usize;
+
+    if pe_offset + 0x18 >= data.len() {
+        return Err(GhostError::ParseError("Invalid PE offset".to_string()));
+    }
+
+    // Check PE signature
+    if &data[pe_offset..pe_offset + 4] != b"PE\0\0" {
+        return Err(GhostError::ParseError("Invalid PE signature".to_string()));
+    }
+
+    // Parse COFF header
+    let number_of_sections =
+        u16::from_le_bytes([data[pe_offset + 6], data[pe_offset + 7]]) as usize;
+    let size_of_optional_header =
+        u16::from_le_bytes([data[pe_offset + 20], data[pe_offset + 21]]) as usize;
+
+    // Section headers start after optional header
+    let section_table_offset = pe_offset + 24 + size_of_optional_header;
+
+    let mut sections = Vec::new();
+
+    for i in 0..number_of_sections {
+        let section_offset = section_table_offset + (i * 40); // Each section header is 40 bytes
+
+        if section_offset + 40 > data.len() {
+            break;
+        }
+
+        // Section name (8 bytes)
+        let name_bytes = &data[section_offset..section_offset + 8];
+        let name = String::from_utf8_lossy(name_bytes)
+            .trim_end_matches('\0')
+            .to_string();
+
+        // Virtual size and address
+        let virtual_size = u32::from_le_bytes([
+            data[section_offset + 8],
+            data[section_offset + 9],
+            data[section_offset + 10],
+            data[section_offset + 11],
+        ]) as usize;
+
+        let virtual_address = u32::from_le_bytes([
+            data[section_offset + 12],
+            data[section_offset + 13],
+            data[section_offset + 14],
+            data[section_offset + 15],
+        ]) as usize;
+
+        // Size of raw data and pointer to raw data
+        let size_of_raw_data = u32::from_le_bytes([
+            data[section_offset + 16],
+            data[section_offset + 17],
+            data[section_offset + 18],
+            data[section_offset + 19],
+        ]) as usize;
+
+        let pointer_to_raw_data = u32::from_le_bytes([
+            data[section_offset + 20],
+            data[section_offset + 21],
+            data[section_offset + 22],
+            data[section_offset + 23],
+        ]) as usize;
+
+        // Characteristics
+        let characteristics = u32::from_le_bytes([
+            data[section_offset + 36],
+            data[section_offset + 37],
+            data[section_offset + 38],
+            data[section_offset + 39],
+        ]);
+
+        // Check if section contains code (IMAGE_SCN_CNT_CODE = 0x00000020)
+        let is_code = (characteristics & 0x20) != 0;
+
+        // Read section data
+        let section_data = if pointer_to_raw_data > 0
+            && pointer_to_raw_data + size_of_raw_data <= data.len()
+        {
+            data[pointer_to_raw_data..pointer_to_raw_data + size_of_raw_data].to_vec()
+        } else {
+            Vec::new()
+        };
+
+        sections.push(PESection {
+            name,
+            virtual_address,
+            size: virtual_size,
+            is_code,
+            data: section_data,
+        });
+    }
+
+    Ok(sections)
 }
 
 impl Default for HollowingDetector {
