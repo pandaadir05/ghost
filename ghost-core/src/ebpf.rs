@@ -13,7 +13,6 @@ use std::time::{Duration, SystemTime};
 /// Linux eBPF-based Process Injection Detection
 /// Provides kernel-level tracing and detection capabilities on Linux systems
 #[cfg(target_os = "linux")]
-#[derive(Debug)]
 pub struct EbpfDetector {
     program_manager: EbpfProgramManager,
     event_processor: EbpfEventProcessor,
@@ -65,7 +64,6 @@ pub struct EbpfProgramDefinition {
 }
 
 #[cfg(target_os = "linux")]
-#[derive(Debug)]
 pub struct EbpfEventProcessor {
     event_handlers: HashMap<EventType, Box<dyn EventHandler>>,
     detection_rules: Vec<EbpfDetectionRule>,
@@ -295,6 +293,7 @@ pub struct DetectionContext {
 }
 
 #[cfg(target_os = "linux")]
+#[derive(Debug)]
 pub struct EbpfDetectionRule {
     pub rule_id: String,
     pub name: String,
@@ -378,6 +377,7 @@ pub enum NetworkPattern {
 }
 
 #[cfg(target_os = "linux")]
+#[derive(Debug)]
 pub struct ProcessTracker {
     processes: HashMap<u32, TrackedProcess>,
     process_tree: HashMap<u32, Vec<u32>>,
