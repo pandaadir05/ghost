@@ -126,10 +126,12 @@ impl DynamicYaraEngine {
             })?;
 
         if !rules_dir.exists() {
-            return Err(GhostError::ConfigurationError(format!(
-                "Rules directory does not exist: {}",
-                rules_dir.display()
-            )));
+            return Err(GhostError::Configuration {
+                message: format!(
+                    "Rules directory does not exist: {}",
+                    rules_dir.display()
+                ),
+            });
         }
 
         let mut compiler = Compiler::new().map_err(|e| GhostError::Configuration {
@@ -175,9 +177,9 @@ impl DynamicYaraEngine {
         }
 
         if rule_count == 0 {
-            return Err(GhostError::ConfigurationError(
-                "No YARA rules were successfully compiled".to_string(),
-            ));
+            return Err(GhostError::Configuration {
+                message: "No YARA rules were successfully compiled".to_string(),
+            });
         }
 
         self.compiled_rules =
@@ -298,11 +300,7 @@ impl DynamicYaraEngine {
         data: &[u8],
         base_address: usize,
     ) -> Result<Vec<RuleMatch>, GhostError> {
-        let mut scanner = Scanner::new(rules).map_err(|e| GhostError::Detection {
-            message: format!("Scanner creation failed: {}", e),
-        })?;
-
-        let scan_results = scanner.scan_mem(data).map_err(|e| GhostError::Detection {
+        let scan_results = rules.scan_mem(data, 300).map_err(|e| GhostError::Detection {
             message: format!("Scan failed: {}", e),
         })?;
 
@@ -317,7 +315,7 @@ impl DynamicYaraEngine {
             for meta in rule.metadatas {
                 let value = match meta.value {
                     yara::MetadataValue::Integer(i) => i.to_string(),
-                    yara::MetadataValue::String(ref s) => s.clone(),
+                    yara::MetadataValue::String(ref s) => s.to_string(),
                     yara::MetadataValue::Boolean(b) => b.to_string(),
                 };
                 metadata.insert(meta.identifier.to_string(), value);

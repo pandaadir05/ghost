@@ -108,7 +108,7 @@ impl DetectionEngine {
 
         // Initialize YARA engine with default rules directory
         let yara_engine = match DynamicYaraEngine::new(Some("rules")) {
-            Ok(mut engine) => {
+            Ok(engine) => {
                 if engine.is_compiled() {
                     log::info!(
                         "YARA engine initialized with {} rules",
@@ -262,17 +262,16 @@ impl DetectionEngine {
 
         // YARA rule scanning
         if let Some(yara_engine) = &self.yara_engine {
-            if let Ok(yara_result) = tokio::runtime::Handle::try_current()
-                .and_then(|handle| {
-                    handle
-                        .block_on(async { yara_engine.scan_process(process, memory_regions).await })
-                })
-                .or_else(|_| {
+            let yara_result = match tokio::runtime::Handle::try_current() {
+                Ok(handle) => handle.block_on(async { yara_engine.scan_process(process, memory_regions).await }),
+                Err(_) => {
                     tokio::runtime::Runtime::new()
                         .unwrap()
                         .block_on(async { yara_engine.scan_process(process, memory_regions).await })
-                })
-            {
+                }
+            };
+            
+            if let Ok(yara_result) = yara_result {
                 if !yara_result.matches.is_empty() {
                     log::info!(
                         "YARA scan found {} matches in {} ms",
