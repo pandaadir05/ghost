@@ -22,6 +22,7 @@ pub struct EbpfDetector {
 }
 
 #[cfg(target_os = "linux")]
+#[derive(Debug)]
 pub struct EbpfProgramManager {
     loaded_programs: HashMap<String, LoadedProgram>,
     program_definitions: Vec<EbpfProgramDefinition>,
@@ -64,6 +65,7 @@ pub struct EbpfProgramDefinition {
 }
 
 #[cfg(target_os = "linux")]
+#[derive(Debug)]
 pub struct EbpfEventProcessor {
     event_handlers: HashMap<EventType, Box<dyn EventHandler>>,
     detection_rules: Vec<EbpfDetectionRule>,
@@ -429,6 +431,7 @@ pub enum IndicatorType {
 }
 
 #[cfg(target_os = "linux")]
+#[derive(Debug)]
 pub struct EbpfFilterManager {
     active_filters: HashMap<String, EbpfFilter>,
     filter_statistics: HashMap<String, FilterStats>,
@@ -481,6 +484,7 @@ pub struct FilterStats {
 }
 
 #[cfg(target_os = "linux")]
+#[derive(Debug)]
 pub struct EbpfRingBuffer {
     buffer: Vec<EbpfEvent>,
     read_index: usize,
