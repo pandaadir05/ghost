@@ -107,8 +107,9 @@ pub use streaming::{
     EventStreamingSystem, EventType, NotificationSystem, StreamingEvent,
 };
 pub use thread::{
-    detect_apc_injection, detect_thread_hijacking, APCInjectionResult, APCThreadInfo,
-    HijackedThreadInfo, ThreadHijackingResult, ThreadInfo,
+    detect_apc_injection, detect_hardware_breakpoints, detect_thread_hijacking, APCInjectionResult,
+    APCThreadInfo, BreakpointInfo, BreakpointType, HardwareBreakpointResult, HijackedThreadInfo,
+    ThreadBreakpoints, ThreadHijackingResult, ThreadInfo,
 };
 pub use threat_intel::{
     Campaign, IndicatorOfCompromise, IocType, SophisticationLevel, ThreatActor as ThreatIntelActor,

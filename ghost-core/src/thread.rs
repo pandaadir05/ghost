@@ -56,6 +56,43 @@ pub struct APCThreadInfo {
     pub indicators: Vec<String>,
 }
 
+/// Hardware breakpoint detection result
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HardwareBreakpointResult {
+    pub thread_breakpoints: Vec<ThreadBreakpoints>,
+    pub total_breakpoints: usize,
+}
+
+/// Breakpoints found in a specific thread
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ThreadBreakpoints {
+    pub tid: u32,
+    pub breakpoints: Vec<BreakpointInfo>,
+    pub dr6: usize, // Debug status register
+    pub dr7: usize, // Debug control register
+}
+
+/// Information about a single hardware breakpoint
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BreakpointInfo {
+    pub register: u8,          // DR0-DR3 (0-3)
+    pub address: usize,        // Breakpoint address
+    pub bp_type: BreakpointType,
+    pub size: u8,              // 1, 2, 4, or 8 bytes
+    pub local_enable: bool,
+    pub global_enable: bool,
+}
+
+/// Hardware breakpoint type
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum BreakpointType {
+    Execute,      // Break on instruction execution
+    Write,        // Break on data write
+    ReadWrite,    // Break on data read or write
+    IoReadWrite,  // Break on I/O read or write
+    Unknown,
+}
+
 /// Thread execution state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ThreadState {
@@ -571,6 +608,113 @@ mod platform {
             0
         }
     }
+
+    /// Detect hardware breakpoints by examining debug registers (DR0-DR7)
+    pub fn detect_hardware_breakpoints(pid: u32) -> Result<super::HardwareBreakpointResult> {
+        use windows::Win32::System::Diagnostics::Debug::CONTEXT;
+        use windows::Win32::System::Diagnostics::Debug::CONTEXT_DEBUG_REGISTERS;
+        use windows::Win32::System::Threading::{
+            GetThreadContext, SuspendThread, ResumeThread,
+            THREAD_GET_CONTEXT, THREAD_SUSPEND_RESUME,
+        };
+
+        let threads = enumerate_threads(pid)?;
+        let mut breakpoints = Vec::new();
+        let mut total_breakpoints = 0;
+
+        unsafe {
+            for thread in threads {
+                // Open thread for context inspection
+                let thread_handle = match OpenThread(
+                    THREAD_GET_CONTEXT | THREAD_SUSPEND_RESUME,
+                    false,
+                    thread.tid,
+                ) {
+                    Ok(h) => h,
+                    Err(_) => continue,
+                };
+
+                // Suspend thread to get consistent debug register state
+                let suspend_count = SuspendThread(thread_handle);
+
+                if suspend_count != u32::MAX {
+                    // Get thread context with debug registers
+                    let mut context = CONTEXT {
+                        ContextFlags: CONTEXT_DEBUG_REGISTERS,
+                        ..Default::default()
+                    };
+
+                    if GetThreadContext(thread_handle, &mut context).is_ok() {
+                        let mut thread_breakpoints = Vec::new();
+
+                        // Check DR0-DR3 (breakpoint addresses)
+                        let dr_addresses = [context.Dr0, context.Dr1, context.Dr2, context.Dr3];
+
+                        // DR7 contains enable bits and type/size for each breakpoint
+                        let dr7 = context.Dr7;
+
+                        for (i, &dr_addr) in dr_addresses.iter().enumerate() {
+                            // Check if breakpoint is enabled (bits 0,2,4,6 for local; bits 1,3,5,7 for global)
+                            let local_enable = (dr7 & (1 << (i * 2))) != 0;
+                            let global_enable = (dr7 & (1 << (i * 2 + 1))) != 0;
+
+                            if (local_enable || global_enable) && dr_addr != 0 {
+                                // Extract type and size from DR7
+                                let rw_bits = (dr7 >> (16 + i * 4)) & 0x3;
+                                let len_bits = (dr7 >> (18 + i * 4)) & 0x3;
+
+                                let bp_type = match rw_bits {
+                                    0 => super::BreakpointType::Execute,
+                                    1 => super::BreakpointType::Write,
+                                    2 => super::BreakpointType::IoReadWrite,
+                                    3 => super::BreakpointType::ReadWrite,
+                                    _ => super::BreakpointType::Unknown,
+                                };
+
+                                let bp_size = match len_bits {
+                                    0 => 1,
+                                    1 => 2,
+                                    2 => 8,
+                                    3 => 4,
+                                    _ => 0,
+                                };
+
+                                thread_breakpoints.push(super::BreakpointInfo {
+                                    register: i as u8,
+                                    address: dr_addr as usize,
+                                    bp_type,
+                                    size: bp_size,
+                                    local_enable,
+                                    global_enable,
+                                });
+
+                                total_breakpoints += 1;
+                            }
+                        }
+
+                        if !thread_breakpoints.is_empty() {
+                            breakpoints.push(super::ThreadBreakpoints {
+                                tid: thread.tid,
+                                breakpoints: thread_breakpoints,
+                                dr6: context.Dr6 as usize, // Debug status register
+                                dr7: context.Dr7 as usize, // Debug control register
+                            });
+                        }
+                    }
+
+                    // Resume thread
+                    let _ = ResumeThread(thread_handle);
+                }
+
+                let _ = CloseHandle(thread_handle);
+            }
+        }
+
+        Ok(super::HardwareBreakpointResult {
+            thread_breakpoints: breakpoints,
+            total_breakpoints,
+        })
+    }
 }
 
 #[cfg(target_os = "linux")]
@@ -902,5 +1046,35 @@ pub fn detect_apc_injection(_pid: u32) -> anyhow::Result<APCInjectionResult> {
     Ok(APCInjectionResult {
         suspicious_threads: Vec::new(),
         total_apcs_detected: 0,
+    })
+}
+
+/// Detects hardware breakpoints by examining debug registers (DR0-DR7).
+///
+/// # Platform Support
+///
+/// - **Windows**: Full support with thread context inspection
+/// - **Linux**: Not yet implemented
+/// - **macOS**: Not yet implemented
+///
+/// # Detection Methods
+///
+/// - DR0-DR3 inspection (breakpoint addresses)
+/// - DR7 analysis (control register with enable bits and types)
+/// - DR6 status register (breakpoint hit status)
+///
+/// # Returns
+///
+/// A `HardwareBreakpointResult` with details of all hardware breakpoints found.
+#[cfg(windows)]
+pub fn detect_hardware_breakpoints(pid: u32) -> anyhow::Result<HardwareBreakpointResult> {
+    platform::detect_hardware_breakpoints(pid)
+}
+
+#[cfg(not(windows))]
+pub fn detect_hardware_breakpoints(_pid: u32) -> anyhow::Result<HardwareBreakpointResult> {
+    Ok(HardwareBreakpointResult {
+        thread_breakpoints: Vec::new(),
+        total_breakpoints: 0,
     })
 }
