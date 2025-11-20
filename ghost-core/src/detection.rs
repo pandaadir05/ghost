@@ -400,6 +400,7 @@ impl DetectionEngine {
                             confidence: ebpf_event.confidence,
                             threat_context: None,
                             evasion_analysis: None,
+                            mitre_analysis: None,
                         };
 
                         detection_results.push(detection_result);

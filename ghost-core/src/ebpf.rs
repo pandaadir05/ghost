@@ -13,6 +13,7 @@ use std::time::{Duration, SystemTime};
 /// Linux eBPF-based Process Injection Detection
 /// Provides kernel-level tracing and detection capabilities on Linux systems
 #[cfg(target_os = "linux")]
+#[derive(Debug)]
 pub struct EbpfDetector {
     program_manager: EbpfProgramManager,
     event_processor: EbpfEventProcessor,
@@ -800,7 +801,7 @@ impl ProcessCreateHandler {
 
 #[cfg(target_os = "linux")]
 impl EventHandler for ProcessCreateHandler {
-    fn handle_event(&mut self, event: &EbpfEvent) -> Option<DetectionEvent> {
+    fn handle_event(&mut self, _event: &EbpfEvent) -> Option<DetectionEvent> {
         // Process creation event handling logic
         None
     }
@@ -822,7 +823,7 @@ impl MemoryMapHandler {
 
 #[cfg(target_os = "linux")]
 impl EventHandler for MemoryMapHandler {
-    fn handle_event(&mut self, event: &EbpfEvent) -> Option<DetectionEvent> {
+    fn handle_event(&mut self, _event: &EbpfEvent) -> Option<DetectionEvent> {
         // Memory mapping event handling logic
         None
     }
@@ -844,7 +845,7 @@ impl MemoryProtectHandler {
 
 #[cfg(target_os = "linux")]
 impl EventHandler for MemoryProtectHandler {
-    fn handle_event(&mut self, event: &EbpfEvent) -> Option<DetectionEvent> {
+    fn handle_event(&mut self, _event: &EbpfEvent) -> Option<DetectionEvent> {
         // Memory protection change event handling logic
         None
     }
@@ -866,7 +867,7 @@ impl InjectionHandler {
 
 #[cfg(target_os = "linux")]
 impl EventHandler for InjectionHandler {
-    fn handle_event(&mut self, event: &EbpfEvent) -> Option<DetectionEvent> {
+    fn handle_event(&mut self, _event: &EbpfEvent) -> Option<DetectionEvent> {
         // Process injection event handling logic
         None
     }
@@ -907,7 +908,7 @@ impl EbpfEventProcessor {
         self.event_handlers.insert(event_type, handler);
     }
 
-    pub fn process_event(&mut self, event: EbpfEvent) -> Option<DetectionEvent> {
+    pub fn process_event(&mut self, _event: EbpfEvent) -> Option<DetectionEvent> {
         // Event processing logic
         None
     }
@@ -937,7 +938,7 @@ impl EbpfFilterManager {
         self.active_filters.insert(filter.filter_id.clone(), filter);
     }
 
-    pub fn should_process(&self, event: &EbpfEvent) -> bool {
+    pub fn should_process(&self, _event: &EbpfEvent) -> bool {
         // Filter evaluation logic
         true
     }

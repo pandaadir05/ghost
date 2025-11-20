@@ -154,7 +154,7 @@ mod platform {
                 false,
                 target_pid,
             )
-            .map_err(|e| GhostError::Process {
+            .map_err(|e| GhostError::Detection {
                 message: format!("Failed to open process: {}", e),
             })?;
 
@@ -172,7 +172,7 @@ mod platform {
 
             if result.is_err() {
                 let _ = CloseHandle(handle);
-                return Err(GhostError::Process {
+                return Err(GhostError::Detection {
                     message: "Failed to enumerate process modules".to_string(),
                 });
             }
@@ -359,7 +359,6 @@ mod platform {
     use super::{HookDetectionResult, HookInfo, HookType};
     use crate::{GhostError, Result};
     use std::fs;
-    use std::path::Path;
 
     /// Detect hook injection on Linux (LD_PRELOAD, LD_LIBRARY_PATH, ptrace).
     pub fn detect_hook_injection(target_pid: u32) -> Result<HookDetectionResult> {
@@ -410,7 +409,7 @@ mod platform {
     fn detect_ld_preload(pid: u32) -> Result<Vec<HookInfo>> {
         let environ_path = format!("/proc/{}/environ", pid);
         let environ_content =
-            fs::read_to_string(&environ_path).map_err(|e| GhostError::Process {
+            fs::read_to_string(&environ_path).map_err(|e| GhostError::Detection {
                 message: format!("Failed to read process environment: {}", e),
             })?;
 
@@ -444,7 +443,7 @@ mod platform {
     fn detect_ld_library_path(pid: u32) -> Result<Vec<HookInfo>> {
         let environ_path = format!("/proc/{}/environ", pid);
         let environ_content =
-            fs::read_to_string(&environ_path).map_err(|e| GhostError::Process {
+            fs::read_to_string(&environ_path).map_err(|e| GhostError::Detection {
                 message: format!("Failed to read process environment: {}", e),
             })?;
 
@@ -486,9 +485,10 @@ mod platform {
     /// Detect ptrace attachment (debugging/injection).
     fn detect_ptrace_attachment(pid: u32) -> Result<bool> {
         let status_path = format!("/proc/{}/status", pid);
-        let status_content = fs::read_to_string(&status_path).map_err(|e| GhostError::Process {
-            message: format!("Failed to read process status: {}", e),
-        })?;
+        let status_content =
+            fs::read_to_string(&status_path).map_err(|e| GhostError::Detection {
+                message: format!("Failed to read process status: {}", e),
+            })?;
 
         // Look for TracerPid field
         for line in status_content.lines() {
@@ -512,7 +512,7 @@ mod platform {
     /// Detect suspicious loaded libraries.
     fn detect_suspicious_libraries(pid: u32) -> Result<Vec<HookInfo>> {
         let maps_path = format!("/proc/{}/maps", pid);
-        let maps_content = fs::read_to_string(&maps_path).map_err(|e| GhostError::Process {
+        let maps_content = fs::read_to_string(&maps_path).map_err(|e| GhostError::Detection {
             message: format!("Failed to read process maps: {}", e),
         })?;
 
