@@ -20,14 +20,14 @@ use ratatui::{
 use std::{
     collections::VecDeque,
     io,
-    sync::{Arc, Mutex},
+    sync::Arc,
     time::{Duration, Instant},
 };
-use tokio::time;
+use tokio::{sync::Mutex, time};
 
 mod app;
-mod ui;
 mod events;
+mod ui;
 
 use app::{App, TabIndex};
 
@@ -42,10 +42,10 @@ async fn main() -> Result<()> {
 
     // Create app state
     let app = Arc::new(Mutex::new(App::new().await?));
-    
+
     // Clone for background task
     let app_clone = Arc::clone(&app);
-    
+
     // Start background scanning task
     tokio::spawn(async move {
         let mut interval = time::interval(Duration::from_secs(2));
@@ -78,15 +78,12 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-async fn run_app<B: Backend>(
-    terminal: &mut Terminal<B>,
-    app: Arc<Mutex<App>>,
-) -> Result<()> {
+async fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: Arc<Mutex<App>>) -> Result<()> {
     loop {
         // Draw the UI
         terminal.draw(|f| {
             if let Ok(app) = app.try_lock() {
-                ui::draw(f, &app);
+                ui::draw::<CrosstermBackend<std::io::Stdout>>(f, &app);
             }
         })?;
 

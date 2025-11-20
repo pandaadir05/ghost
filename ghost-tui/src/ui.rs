@@ -44,19 +44,20 @@ pub fn draw<B: Backend>(f: &mut Frame, app: &App) {
         .split(size);
 
     // Draw header
-    draw_header(f, chunks[0], app);
+    draw_header::<B>(f, chunks[0], app);
 
     // Draw main content based on selected tab
     match app.current_tab {
-        TabIndex::Overview => draw_overview(f, chunks[1], app),
-        TabIndex::Processes => draw_processes(f, chunks[1], app),
-        TabIndex::Detections => draw_detections(f, chunks[1], app),
-        TabIndex::Memory => draw_memory(f, chunks[1], app),
-        TabIndex::Logs => draw_logs(f, chunks[1], app),
+        TabIndex::Overview => draw_overview::<B>(f, chunks[1], app),
+        TabIndex::Processes => draw_processes::<B>(f, chunks[1], app),
+        TabIndex::Detections => draw_detections::<B>(f, chunks[1], app),
+        TabIndex::Memory => draw_memory::<B>(f, chunks[1], app),
+        TabIndex::Logs => draw_logs::<B>(f, chunks[1], app),
+        TabIndex::ThreatIntel => {} // TODO: Implement threat intel view
     }
 
     // Draw footer
-    draw_footer(f, chunks[2], app);
+    draw_footer::<B>(f, chunks[2], app);
 }
 
 fn draw_header<B: Backend>(f: &mut Frame, area: Rect, app: &App) {
@@ -83,11 +84,18 @@ fn draw_header<B: Backend>(f: &mut Frame, area: Rect, app: &App) {
 
 fn draw_footer<B: Backend>(f: &mut Frame, area: Rect, app: &App) {
     let help_text = match app.current_tab {
-        TabIndex::Overview => "Up/Down: Navigate | Tab: Switch tabs | R: Refresh | C: Clear | Q: Quit",
-        TabIndex::Processes => "Up/Down: Select process | Enter: View details | Tab: Switch tabs | Q: Quit",
-        TabIndex::Detections => "Up/Down: Navigate detections | C: Clear history | Tab: Switch tabs | Q: Quit",
+        TabIndex::Overview => {
+            "Up/Down: Navigate | Tab: Switch tabs | R: Refresh | C: Clear | Q: Quit"
+        }
+        TabIndex::Processes => {
+            "Up/Down: Select process | Enter: View details | Tab: Switch tabs | Q: Quit"
+        }
+        TabIndex::Detections => {
+            "Up/Down: Navigate detections | C: Clear history | Tab: Switch tabs | Q: Quit"
+        }
         TabIndex::Memory => "Up/Down: Navigate | Tab: Switch tabs | R: Refresh | Q: Quit",
         TabIndex::Logs => "Up/Down: Navigate logs | C: Clear logs | Tab: Switch tabs | Q: Quit",
+        TabIndex::ThreatIntel => "Up/Down: Navigate threats | Tab: Switch tabs | Q: Quit",
     };
 
     let footer = Paragraph::new(help_text)
@@ -106,20 +114,20 @@ fn draw_overview<B: Backend>(f: &mut Frame, area: Rect, app: &App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(8),  // Stats
-            Constraint::Length(8),  // Threat level gauge
-            Constraint::Min(0),     // Recent detections
+            Constraint::Length(8), // Stats
+            Constraint::Length(8), // Threat level gauge
+            Constraint::Min(0),    // Recent detections
         ])
         .split(area);
 
     // Statistics panel
-    draw_stats_panel(f, chunks[0], app);
-    
+    draw_stats_panel::<B>(f, chunks[0], app);
+
     // Threat level gauge
-    draw_threat_gauge(f, chunks[1], app);
-    
+    draw_threat_gauge::<B>(f, chunks[1], app);
+
     // Recent detections
-    draw_recent_detections(f, chunks[2], app);
+    draw_recent_detections::<B>(f, chunks[2], app);
 }
 
 fn draw_stats_panel<B: Backend>(f: &mut Frame, area: Rect, app: &App) {
@@ -277,27 +285,31 @@ fn draw_processes<B: Backend>(f: &mut Frame, area: Rect, app: &App) {
     let header_cells = ["PID", "PPID", "Name", "Threads", "Status"]
         .iter()
         .map(|h| Cell::from(*h).style(Style::default().fg(PRIMARY).add_modifier(Modifier::BOLD)));
-    
+
     let header = Row::new(header_cells).height(1).bottom_margin(1);
 
-    let rows: Vec<Row> = app.processes.iter().map(|proc| {
-        let status = match app.detections.iter().find(|d| d.process.pid == proc.pid) {
-            Some(detection) => match detection.threat_level {
-                ThreatLevel::Malicious => "MALICIOUS",
-                ThreatLevel::Suspicious => "SUSPICIOUS",
-                ThreatLevel::Clean => "CLEAN",
-            },
-            None => "CLEAN",
-        };
+    let rows: Vec<Row> = app
+        .processes
+        .iter()
+        .map(|proc| {
+            let status = match app.detections.iter().find(|d| d.process.pid == proc.pid) {
+                Some(detection) => match detection.threat_level {
+                    ThreatLevel::Malicious => "MALICIOUS",
+                    ThreatLevel::Suspicious => "SUSPICIOUS",
+                    ThreatLevel::Clean => "CLEAN",
+                },
+                None => "CLEAN",
+            };
 
-        Row::new(vec![
-            Cell::from(proc.pid.to_string()),
-            Cell::from(proc.ppid.to_string()),
-            Cell::from(proc.name.as_str()),
-            Cell::from(proc.thread_count.to_string()),
-            Cell::from(status),
-        ])
-    }).collect();
+            Row::new(vec![
+                Cell::from(proc.pid.to_string()),
+                Cell::from(proc.ppid.to_string()),
+                Cell::from(proc.name.as_str()),
+                Cell::from(proc.thread_count.to_string()),
+                Cell::from(status),
+            ])
+        })
+        .collect();
 
     let table = Table::new(rows)
         .header(header)
@@ -320,7 +332,7 @@ fn draw_processes<B: Backend>(f: &mut Frame, area: Rect, app: &App) {
     f.render_stateful_widget(table, chunks[0], &mut state);
 
     // Process details panel
-    draw_process_details(f, chunks[1], app);
+    draw_process_details::<B>(f, chunks[1], app);
 }
 
 fn draw_process_details<B: Backend>(f: &mut Frame, area: Rect, app: &App) {
@@ -394,7 +406,10 @@ fn draw_detections<B: Backend>(f: &mut Frame, area: Rect, app: &App) {
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .title(format!("Detection History ({} total)", app.detections.len()))
+                .title(format!(
+                    "Detection History ({} total)",
+                    app.detections.len()
+                ))
                 .border_style(Style::default().fg(DANGER)),
         )
         .style(Style::default().fg(TEXT));

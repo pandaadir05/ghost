@@ -89,14 +89,14 @@ pub struct App {
     pub stats: SystemStats,
     pub threat_intel_data: ThreatIntelData,
     pub last_scan: Option<Instant>,
-    
+
     // UI state
     pub processes_state: TableState,
     pub detections_state: ListState,
     pub logs_state: ListState,
     pub threat_intel_state: ListState,
     pub selected_process: Option<ProcessInfo>,
-    
+
     // Settings
     pub auto_refresh: bool,
     pub max_log_entries: usize,
@@ -180,7 +180,8 @@ impl App {
         let mut suspicious_count = 0;
         let mut malicious_count = 0;
 
-        for proc in &self.processes {
+        let processes = self.processes.clone();
+        for proc in &processes {
             if Self::should_skip_process(proc) {
                 continue;
             }
@@ -251,7 +252,7 @@ impl App {
     pub fn add_detection(&mut self, detection: DetectionEvent) {
         // Add to front of deque for most recent first
         self.detections.push_front(detection);
-        
+
         // Limit size
         while self.detections.len() > self.max_detection_entries {
             self.detections.pop_back();
@@ -261,9 +262,9 @@ impl App {
     pub fn add_log_message(&mut self, message: String) {
         let timestamp = Utc::now().format("%H:%M:%S");
         let log_entry = format!("[{}] {}", timestamp, message);
-        
+
         self.logs.push_front(log_entry);
-        
+
         // Limit log size
         while self.logs.len() > self.max_log_entries {
             self.logs.pop_back();
@@ -397,7 +398,7 @@ impl App {
         let processes_size = self.processes.len() * std::mem::size_of::<ProcessInfo>();
         let detections_size = self.detections.len() * 200; // Estimate per detection
         let logs_size = self.logs.iter().map(|s| s.len()).sum::<usize>();
-        
+
         (processes_size + detections_size + logs_size) as f64 / 1024.0 / 1024.0
     }
 
