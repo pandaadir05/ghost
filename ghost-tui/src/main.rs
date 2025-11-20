@@ -5,13 +5,10 @@ use crossterm::{
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use ratatui::{
-    backend::{Backend, CrosstermBackend}, Terminal,
+    backend::{Backend, CrosstermBackend},
+    Terminal,
 };
-use std::{
-    io,
-    sync::Arc,
-    time::Duration,
-};
+use std::{io, sync::Arc, time::Duration};
 use tokio::{sync::Mutex, time};
 
 mod app;

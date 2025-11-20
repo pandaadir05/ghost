@@ -740,11 +740,11 @@ mod platform {
                 let protection = match info.protection {
                     0 => MemoryProtection::NoAccess,
                     1 => MemoryProtection::ReadOnly,
-                    2 => MemoryProtection::ReadWrite,  // Write implies read on most systems
+                    2 => MemoryProtection::ReadWrite, // Write implies read on most systems
                     3 => MemoryProtection::ReadWrite,
                     4 => MemoryProtection::Execute,
                     5 => MemoryProtection::ReadExecute,
-                    6 => MemoryProtection::ReadWriteExecute,  // WX -> RWX
+                    6 => MemoryProtection::ReadWriteExecute, // WX -> RWX
                     7 => MemoryProtection::ReadWriteExecute,
                     _ => MemoryProtection::NoAccess,
                 };

@@ -168,7 +168,8 @@ mod tests {
         let mut config = DetectionConfig::default();
         config.hook_detection = false;
 
-        let mut engine = DetectionEngine::with_config(Some(config)).expect("Failed to create engine");
+        let mut engine =
+            DetectionEngine::with_config(Some(config)).expect("Failed to create engine");
         let process = create_test_process();
         let regions = vec![create_rwx_region()];
 
@@ -207,7 +208,11 @@ mod tests {
 
         let result = engine.analyze_process(&process, &image_regions, None);
         // IMAGE regions may trigger ML heuristics, but should not be flagged as Malicious
-        assert_ne!(result.threat_level, ThreatLevel::Malicious, "IMAGE region should not be malicious");
+        assert_ne!(
+            result.threat_level,
+            ThreatLevel::Malicious,
+            "IMAGE region should not be malicious"
+        );
 
         // PRIVATE region with RWX is highly suspicious
         let private_regions = vec![MemoryRegion {
@@ -218,8 +223,15 @@ mod tests {
         }];
 
         let result2 = engine.analyze_process(&process, &private_regions, None);
-        assert_ne!(result2.threat_level, ThreatLevel::Clean, "RWX private region should be suspicious");
-        assert!(result2.confidence > 0.3, "RWX private region should have high confidence");
+        assert_ne!(
+            result2.threat_level,
+            ThreatLevel::Clean,
+            "RWX private region should be suspicious"
+        );
+        assert!(
+            result2.confidence > 0.3,
+            "RWX private region should have high confidence"
+        );
     }
 }
 
