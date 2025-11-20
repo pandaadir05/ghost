@@ -468,9 +468,7 @@ mod platform {
                     });
                 }
 
-                address = (mbi.BaseAddress as usize)
-                    .checked_add(mbi.RegionSize)
-                    .unwrap_or(usize::MAX);
+                address = (mbi.BaseAddress as usize).saturating_add(mbi.RegionSize);
 
                 if address == usize::MAX {
                     break;

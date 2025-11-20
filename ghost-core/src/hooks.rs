@@ -181,9 +181,9 @@ mod platform {
             // Check each critical API for hooks
             for (module_name, func_name) in CRITICAL_APIS {
                 // Find the module in target process
-                for i in 0..module_count {
+                for module in modules.iter().take(module_count) {
                     let mut name_buffer = [0u16; 256];
-                    if GetModuleBaseNameW(handle, modules[i], &mut name_buffer) == 0 {
+                    if GetModuleBaseNameW(handle, *module, &mut name_buffer) == 0 {
                         continue;
                     }
 
