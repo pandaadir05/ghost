@@ -203,7 +203,7 @@ mod platform {
                     let mut mod_info = MODULEINFO::default();
                     if GetModuleInformation(
                         handle,
-                        modules[i],
+                        *module,
                         &mut mod_info,
                         std::mem::size_of::<MODULEINFO>() as u32,
                     )
