@@ -395,9 +395,7 @@ pub enum NotificationError {
 }
 
 /// Email notification channel
-pub struct EmailChannel {
-    smtp_config: SmtpConfig,
-}
+pub struct EmailChannel {}
 
 #[derive(Debug, Clone)]
 pub struct SmtpConfig {
@@ -908,10 +906,8 @@ impl NotificationSystem {
         }
     }
 
-    pub fn add_email_channel(&mut self, name: String, config: SmtpConfig) {
-        let channel = EmailChannel {
-            smtp_config: config,
-        };
+    pub fn add_email_channel(&mut self, name: String, _config: SmtpConfig) {
+        let channel = EmailChannel {};
         self.channels.insert(name, Box::new(channel));
     }
 

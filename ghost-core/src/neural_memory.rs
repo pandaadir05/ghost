@@ -5,7 +5,7 @@ use std::collections::HashMap;
 #[derive(Debug)]
 pub struct NeuralMemoryAnalyzer {
     neural_networks: Vec<NeuralNetwork>,
-    confidence_threshold: f32,
+    _confidence_threshold: f32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -136,7 +136,7 @@ impl NeuralMemoryAnalyzer {
 
         Ok(NeuralMemoryAnalyzer {
             neural_networks,
-            confidence_threshold: 0.8,
+            _confidence_threshold: 0.8,
         })
     }
 

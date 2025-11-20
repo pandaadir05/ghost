@@ -66,7 +66,7 @@ pub struct DetectionEngine {
     threat_intelligence: ThreatIntelligence,
     evasion_detector: EvasionDetector,
     mitre_engine: MitreAttackEngine,
-    config: Option<DetectionConfig>,
+    _config: Option<DetectionConfig>,
     #[cfg(target_os = "linux")]
     ebpf_detector: Option<EbpfDetector>,
 }
@@ -130,7 +130,7 @@ impl DetectionEngine {
             threat_intelligence,
             evasion_detector,
             mitre_engine,
-            config,
+            _config: config,
             #[cfg(target_os = "linux")]
             ebpf_detector,
         })

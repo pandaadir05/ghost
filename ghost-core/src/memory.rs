@@ -637,14 +637,9 @@ mod platform {
     #[allow(non_camel_case_types)]
     type vm_size_t = usize;
     #[allow(non_camel_case_types)]
-    type vm_prot_t = c_int;
-    #[allow(non_camel_case_types)]
     type kern_return_t = c_int;
 
     const KERN_SUCCESS: kern_return_t = 0;
-    const VM_PROT_READ: vm_prot_t = 0x01;
-    const VM_PROT_WRITE: vm_prot_t = 0x02;
-    const VM_PROT_EXECUTE: vm_prot_t = 0x04;
 
     // External mach functions
     extern "C" {

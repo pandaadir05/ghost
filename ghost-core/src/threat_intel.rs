@@ -98,7 +98,6 @@ pub struct BehaviorSignature {
     pub name: String,
     pub description: String,
     pub patterns: Vec<BehaviorPattern>,
-    pub confidence_threshold: f32,
     pub severity: ThreatLevel,
 }
 
@@ -161,7 +160,6 @@ pub struct FeedCredential {
 #[derive(Debug)]
 pub struct AttributionEngine {
     threat_actors: HashMap<String, ThreatActor>,
-    campaigns: HashMap<String, Campaign>,
     attribution_rules: Vec<AttributionRule>,
     similarity_calculator: SimilarityCalculator,
 }
@@ -643,7 +641,6 @@ impl AttributionEngine {
     pub fn new() -> Self {
         Self {
             threat_actors: HashMap::new(),
-            campaigns: HashMap::new(),
             attribution_rules: Vec::new(),
             similarity_calculator: SimilarityCalculator::new(),
         }
@@ -667,10 +664,9 @@ impl AttributionEngine {
                 if let Some(actor) = self.threat_actors.get(&rule.threat_actor) {
                     best_actor = Some(actor.clone());
                 }
-                if let Some(campaign_name) = &rule.campaign {
-                    if let Some(campaign) = self.campaigns.get(campaign_name) {
-                        best_campaign = Some(campaign.clone());
-                    }
+                // Campaign lookup removed - field no longer exists
+                if rule.campaign.is_some() {
+                    best_campaign = None; // Stub: would lookup from external source
                 }
             }
         }
