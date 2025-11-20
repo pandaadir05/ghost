@@ -75,11 +75,11 @@ pub enum EventSeverity {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum EventData {
-    Detection(DetectionEventData),
-    ThreatIntel(ThreatIntelEventData),
+    Detection(Box<DetectionEventData>),
+    ThreatIntel(Box<ThreatIntelEventData>),
     Evasion(EvasionEventData),
     System(SystemEventData),
-    Alert(AlertEventData),
+    Alert(Box<AlertEventData>),
     Performance(PerformanceEventData),
 }
 
@@ -559,11 +559,11 @@ impl EventStreamingSystem {
                 ThreatLevel::Suspicious => EventSeverity::Medium,
                 ThreatLevel::Malicious => EventSeverity::High,
             },
-            data: EventData::Detection(DetectionEventData {
+            data: EventData::Detection(Box::new(DetectionEventData {
                 detection_result: detection,
                 analysis_duration: Duration::from_millis(100), // Would be actual duration
                 confidence_threshold: 0.7,
-            }),
+            })),
             correlation_id: None,
             tags: vec!["process-injection".to_string(), "detection".to_string()],
         };

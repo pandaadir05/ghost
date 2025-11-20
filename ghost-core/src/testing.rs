@@ -398,80 +398,78 @@ impl TestFramework {
 
     /// Create detection engine unit tests
     fn create_detection_engine_tests(&mut self) {
-        let mut test_cases = Vec::new();
-
-        // Test clean process detection
-        test_cases.push(TestCase {
-            name: "clean_process_detection".to_string(),
-            description: "Verify clean processes are not flagged".to_string(),
-            test_function: TestFunction::DetectionTest(DetectionTestParams {
-                process_data: ProcessTestData {
-                    name: "notepad.exe".to_string(),
-                    pid: 1234,
-                    path: Some("C:\\Windows\\System32\\notepad.exe".to_string()),
-                    thread_count: 1,
-                    suspicious_indicators: Vec::new(),
-                },
-                memory_data: vec![MemoryTestData {
-                    base_address: 0x400000,
-                    size: 0x10000,
-                    protection: MemoryProtection::ReadExecute,
-                    contains_shellcode: false,
-                    shellcode_pattern: None,
-                }],
-                thread_data: vec![ThreadTestData {
-                    tid: 5678,
-                    entry_point: 0x401000,
-                    stack_base: 0x500000,
-                    stack_size: 0x10000,
-                    is_suspicious: false,
-                }],
-                injection_type: None,
-            }),
-            expected_result: ExpectedResult::ThreatLevel(ThreatLevel::Clean),
-            timeout: Duration::from_secs(5),
-            tags: vec!["unit".to_string(), "detection".to_string()],
-        });
-
-        // Test malicious process detection
-        test_cases.push(TestCase {
-            name: "malicious_process_detection".to_string(),
-            description: "Verify malicious processes are properly detected".to_string(),
-            test_function: TestFunction::DetectionTest(DetectionTestParams {
-                process_data: ProcessTestData {
-                    name: "malware.exe".to_string(),
-                    pid: 9999,
-                    path: Some("C:\\Temp\\malware.exe".to_string()),
-                    thread_count: 5,
-                    suspicious_indicators: vec![
-                        "High RWX memory usage".to_string(),
-                        "Suspicious API calls".to_string(),
-                    ],
-                },
-                memory_data: vec![MemoryTestData {
-                    base_address: 0x200000,
-                    size: 0x1000,
-                    protection: MemoryProtection::ReadWriteExecute,
-                    contains_shellcode: true,
-                    shellcode_pattern: Some(vec![0x90, 0x90, 0xEB, 0xFE]), // NOP NOP JMP -2
-                }],
-                thread_data: vec![ThreadTestData {
-                    tid: 1111,
-                    entry_point: 0x200000,
-                    stack_base: 0x600000,
-                    stack_size: 0x10000,
-                    is_suspicious: true,
-                }],
-                injection_type: Some(InjectionTestType::ShellcodeInjection),
-            }),
-            expected_result: ExpectedResult::ThreatLevel(ThreatLevel::Malicious),
-            timeout: Duration::from_secs(10),
-            tags: vec![
-                "unit".to_string(),
-                "detection".to_string(),
-                "malware".to_string(),
-            ],
-        });
+        let test_cases = vec![
+            TestCase {
+                name: "clean_process_detection".to_string(),
+                description: "Verify clean processes are not flagged".to_string(),
+                test_function: TestFunction::DetectionTest(DetectionTestParams {
+                    process_data: ProcessTestData {
+                        name: "notepad.exe".to_string(),
+                        pid: 1234,
+                        path: Some("C:\\Windows\\System32\\notepad.exe".to_string()),
+                        thread_count: 1,
+                        suspicious_indicators: Vec::new(),
+                    },
+                    memory_data: vec![MemoryTestData {
+                        base_address: 0x400000,
+                        size: 0x10000,
+                        protection: MemoryProtection::ReadExecute,
+                        contains_shellcode: false,
+                        shellcode_pattern: None,
+                    }],
+                    thread_data: vec![ThreadTestData {
+                        tid: 5678,
+                        entry_point: 0x401000,
+                        stack_base: 0x500000,
+                        stack_size: 0x10000,
+                        is_suspicious: false,
+                    }],
+                    injection_type: None,
+                }),
+                expected_result: ExpectedResult::ThreatLevel(ThreatLevel::Clean),
+                timeout: Duration::from_secs(5),
+                tags: vec!["unit".to_string(), "detection".to_string()],
+            },
+            // Test malicious process detection
+            TestCase {
+                name: "malicious_process_detection".to_string(),
+                description: "Verify malicious processes are properly detected".to_string(),
+                test_function: TestFunction::DetectionTest(DetectionTestParams {
+                    process_data: ProcessTestData {
+                        name: "malware.exe".to_string(),
+                        pid: 9999,
+                        path: Some("C:\\Temp\\malware.exe".to_string()),
+                        thread_count: 5,
+                        suspicious_indicators: vec![
+                            "High RWX memory usage".to_string(),
+                            "Suspicious API calls".to_string(),
+                        ],
+                    },
+                    memory_data: vec![MemoryTestData {
+                        base_address: 0x200000,
+                        size: 0x1000,
+                        protection: MemoryProtection::ReadWriteExecute,
+                        contains_shellcode: true,
+                        shellcode_pattern: Some(vec![0x90, 0x90, 0xEB, 0xFE]), // NOP NOP JMP -2
+                    }],
+                    thread_data: vec![ThreadTestData {
+                        tid: 1111,
+                        entry_point: 0x200000,
+                        stack_base: 0x600000,
+                        stack_size: 0x10000,
+                        is_suspicious: true,
+                    }],
+                    injection_type: Some(InjectionTestType::ShellcodeInjection),
+                }),
+                expected_result: ExpectedResult::ThreatLevel(ThreatLevel::Malicious),
+                timeout: Duration::from_secs(10),
+                tags: vec![
+                    "unit".to_string(),
+                    "detection".to_string(),
+                    "malware".to_string(),
+                ],
+            },
+        ];
 
         let test_suite = TestSuite {
             name: "detection_engine_tests".to_string(),
@@ -487,10 +485,7 @@ impl TestFramework {
 
     /// Create shellcode detection tests
     fn create_shellcode_detection_tests(&mut self) {
-        let mut test_cases = Vec::new();
-
-        // Test common shellcode patterns
-        test_cases.push(TestCase {
+        let test_cases = vec![TestCase {
             name: "common_shellcode_patterns".to_string(),
             description: "Detect common shellcode patterns".to_string(),
             test_function: TestFunction::DetectionTest(DetectionTestParams {
@@ -519,7 +514,7 @@ impl TestFramework {
             expected_result: ExpectedResult::IndicatorPresent("Shellcode detected".to_string()),
             timeout: Duration::from_secs(5),
             tags: vec!["unit".to_string(), "shellcode".to_string()],
-        });
+        }];
 
         let test_suite = TestSuite {
             name: "shellcode_detection_tests".to_string(),
@@ -535,9 +530,7 @@ impl TestFramework {
 
     /// Create process hollowing detection tests
     fn create_process_hollowing_tests(&mut self) {
-        let mut test_cases = Vec::new();
-
-        test_cases.push(TestCase {
+        let test_cases = vec![TestCase {
             name: "process_hollowing_detection".to_string(),
             description: "Detect process hollowing techniques".to_string(),
             test_function: TestFunction::DetectionTest(DetectionTestParams {
@@ -564,7 +557,7 @@ impl TestFramework {
             expected_result: ExpectedResult::IndicatorPresent("Process hollowing".to_string()),
             timeout: Duration::from_secs(10),
             tags: vec!["unit".to_string(), "hollowing".to_string()],
-        });
+        }];
 
         let test_suite = TestSuite {
             name: "process_hollowing_tests".to_string(),
@@ -580,9 +573,7 @@ impl TestFramework {
 
     /// Create evasion detection tests
     fn create_evasion_detection_tests(&mut self) {
-        let mut test_cases = Vec::new();
-
-        test_cases.push(TestCase {
+        let test_cases = vec![TestCase {
             name: "anti_debug_detection".to_string(),
             description: "Detect anti-debugging techniques".to_string(),
             test_function: TestFunction::DetectionTest(DetectionTestParams {
@@ -603,7 +594,7 @@ impl TestFramework {
             expected_result: ExpectedResult::IndicatorPresent("Evasion technique".to_string()),
             timeout: Duration::from_secs(15),
             tags: vec!["unit".to_string(), "evasion".to_string()],
-        });
+        }];
 
         let test_suite = TestSuite {
             name: "evasion_detection_tests".to_string(),
@@ -625,39 +616,38 @@ impl TestFramework {
 
     /// Create performance benchmark tests
     fn create_performance_tests(&mut self) {
-        let mut benchmarks = Vec::new();
-
-        benchmarks.push(Benchmark {
-            name: "single_process_analysis".to_string(),
-            description: "Benchmark single process analysis performance".to_string(),
-            benchmark_function: BenchmarkFunction::ProcessAnalysis(ProcessAnalysisBenchmark {
-                process_count: 1,
-                complexity_level: ComplexityLevel::Moderate,
-            }),
-            warm_up_iterations: 10,
-            measurement_iterations: 100,
-            target_metrics: vec![
-                PerformanceMetric::ExecutionTime,
-                PerformanceMetric::MemoryUsage,
-                PerformanceMetric::CPUUtilization,
-            ],
-        });
-
-        benchmarks.push(Benchmark {
-            name: "bulk_process_analysis".to_string(),
-            description: "Benchmark bulk process analysis performance".to_string(),
-            benchmark_function: BenchmarkFunction::ProcessAnalysis(ProcessAnalysisBenchmark {
-                process_count: 100,
-                complexity_level: ComplexityLevel::Simple,
-            }),
-            warm_up_iterations: 5,
-            measurement_iterations: 20,
-            target_metrics: vec![
-                PerformanceMetric::ThroughputRate,
-                PerformanceMetric::LatencyP95,
-                PerformanceMetric::MemoryUsage,
-            ],
-        });
+        let benchmarks = vec![
+            Benchmark {
+                name: "single_process_analysis".to_string(),
+                description: "Benchmark single process analysis performance".to_string(),
+                benchmark_function: BenchmarkFunction::ProcessAnalysis(ProcessAnalysisBenchmark {
+                    process_count: 1,
+                    complexity_level: ComplexityLevel::Moderate,
+                }),
+                warm_up_iterations: 10,
+                measurement_iterations: 100,
+                target_metrics: vec![
+                    PerformanceMetric::ExecutionTime,
+                    PerformanceMetric::MemoryUsage,
+                    PerformanceMetric::CPUUtilization,
+                ],
+            },
+            Benchmark {
+                name: "bulk_process_analysis".to_string(),
+                description: "Benchmark bulk process analysis performance".to_string(),
+                benchmark_function: BenchmarkFunction::ProcessAnalysis(ProcessAnalysisBenchmark {
+                    process_count: 100,
+                    complexity_level: ComplexityLevel::Simple,
+                }),
+                warm_up_iterations: 5,
+                measurement_iterations: 20,
+                target_metrics: vec![
+                    PerformanceMetric::ThroughputRate,
+                    PerformanceMetric::LatencyP95,
+                    PerformanceMetric::MemoryUsage,
+                ],
+            },
+        ];
 
         let benchmark_suite = BenchmarkSuite {
             name: "performance_benchmarks".to_string(),

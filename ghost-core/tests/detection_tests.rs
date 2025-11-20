@@ -139,8 +139,10 @@ mod tests {
         let config = DetectionConfig::default();
         assert!(config.validate().is_ok());
 
-        let mut invalid_config = DetectionConfig::default();
-        invalid_config.confidence_threshold = 1.5; // Invalid
+        let mut invalid_config = DetectionConfig {
+            confidence_threshold: 1.5, // Invalid
+            ..Default::default()
+        };
         assert!(invalid_config.validate().is_err());
 
         invalid_config.confidence_threshold = -0.1; // Invalid
@@ -165,8 +167,10 @@ mod tests {
 
     #[test]
     fn test_engine_with_custom_config() {
-        let mut config = DetectionConfig::default();
-        config.hook_detection = false;
+        let config = DetectionConfig {
+            hook_detection: false,
+            ..Default::default()
+        };
 
         let mut engine =
             DetectionEngine::with_config(Some(config)).expect("Failed to create engine");

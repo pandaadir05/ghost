@@ -69,7 +69,7 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: Arc<Mutex<App>>) -
         // Draw the UI
         terminal.draw(|f| {
             if let Ok(app) = app.try_lock() {
-                ui::draw::<CrosstermBackend<std::io::Stdout>>(f, &app);
+                ui::draw(f, &app);
             }
         })?;
 

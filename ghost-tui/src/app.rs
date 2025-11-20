@@ -379,19 +379,16 @@ impl App {
     }
 
     pub fn select_item(&mut self) {
-        match self.current_tab {
-            TabIndex::Processes => {
-                if let Some(i) = self.processes_state.selected() {
-                    if let Some(process) = self.processes.get(i) {
-                        self.selected_process = Some(process.clone());
-                        self.add_log_message(format!(
-                            "Selected process: {} (PID: {})",
-                            process.name, process.pid
-                        ));
-                    }
+        if self.current_tab == TabIndex::Processes {
+            if let Some(i) = self.processes_state.selected() {
+                if let Some(process) = self.processes.get(i) {
+                    self.selected_process = Some(process.clone());
+                    self.add_log_message(format!(
+                        "Selected process: {} (PID: {})",
+                        process.name, process.pid
+                    ));
                 }
             }
-            _ => {}
         }
     }
 

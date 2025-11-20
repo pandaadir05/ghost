@@ -296,6 +296,12 @@ pub struct CertificateInfo {
     pub valid_to: SystemTime,
 }
 
+impl Default for ThreatIntelligence {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ThreatIntelligence {
     pub fn new() -> Self {
         Self {
@@ -551,6 +557,12 @@ impl ThreatIntelligence {
     }
 }
 
+impl Default for IocDatabase {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl IocDatabase {
     pub fn new() -> Self {
         Self {
@@ -570,13 +582,13 @@ impl IocDatabase {
             IocType::FileHash => {
                 self.hash_index
                     .entry(ioc.value.clone())
-                    .or_insert_with(Vec::new)
+                    .or_default()
                     .push(ioc.id.clone());
             }
             IocType::MemorySignature | IocType::BehaviorPattern => {
                 self.pattern_index
                     .entry(ioc.value.clone())
-                    .or_insert_with(Vec::new)
+                    .or_default()
                     .push(ioc.id.clone());
             }
             _ => {}
@@ -634,6 +646,12 @@ impl IocDatabase {
         for ioc in new_iocs {
             self.add_indicator(ioc);
         }
+    }
+}
+
+impl Default for AttributionEngine {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -725,6 +743,12 @@ impl AttributionEngine {
     }
 }
 
+impl Default for SimilarityCalculator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SimilarityCalculator {
     pub fn new() -> Self {
         Self {
@@ -732,6 +756,12 @@ impl SimilarityCalculator {
             temporal_weights: HashMap::new(),
             behavioral_weights: HashMap::new(),
         }
+    }
+}
+
+impl Default for ReputationCache {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
