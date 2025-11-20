@@ -7,10 +7,10 @@
 #[cfg(target_os = "linux")]
 use crate::EbpfDetector;
 use crate::{
-    detect_hook_injection, AnomalyDetector, DetectionConfig, EvasionDetector, EvasionResult,
-    GhostError, HollowingDetector, MemoryProtection, MemoryRegion, MitreAnalysisResult,
-    MitreAttackEngine, ProcessInfo, ShellcodeDetector, ThreadInfo, ThreatContext,
-    ThreatIntelligence,
+    detect_hook_injection, AnomalyDetector, DetectionConfig, DynamicYaraEngine, EvasionDetector,
+    EvasionResult, GhostError, HollowingDetector, MemoryProtection, MemoryRegion,
+    MitreAnalysisResult, MitreAttackEngine, ProcessInfo, ShellcodeDetector, ThreadInfo,
+    ThreatContext, ThreatIntelligence,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -66,6 +66,7 @@ pub struct DetectionEngine {
     threat_intelligence: ThreatIntelligence,
     evasion_detector: EvasionDetector,
     mitre_engine: MitreAttackEngine,
+    yara_engine: Option<DynamicYaraEngine>,
     _config: Option<DetectionConfig>,
     #[cfg(target_os = "linux")]
     ebpf_detector: Option<EbpfDetector>,
@@ -105,6 +106,26 @@ impl DetectionEngine {
         let evasion_detector = EvasionDetector::new();
         let mitre_engine = MitreAttackEngine::new()?;
 
+        // Initialize YARA engine with default rules directory
+        let yara_engine = match DynamicYaraEngine::new(Some("rules")) {
+            Ok(mut engine) => {
+                if engine.is_compiled() {
+                    log::info!(
+                        "YARA engine initialized with {} rules",
+                        engine.get_rule_count()
+                    );
+                    Some(engine)
+                } else {
+                    log::warn!("YARA rules not compiled, engine disabled");
+                    None
+                }
+            }
+            Err(e) => {
+                log::warn!("Failed to initialize YARA engine: {:?}", e);
+                None
+            }
+        };
+
         #[cfg(target_os = "linux")]
         let ebpf_detector = match EbpfDetector::new() {
             Ok(mut detector) => {
@@ -130,6 +151,7 @@ impl DetectionEngine {
             threat_intelligence,
             evasion_detector,
             mitre_engine,
+            yara_engine,
             _config: config,
             #[cfg(target_os = "linux")]
             ebpf_detector,
@@ -236,6 +258,50 @@ impl DetectionEngine {
                 indicators.push(format!("Process hollowing: {}", indicator));
             }
             confidence += hollowing_detection.confidence;
+        }
+
+        // YARA rule scanning
+        if let Some(yara_engine) = &self.yara_engine {
+            if let Ok(yara_result) =
+                tokio::runtime::Handle::try_current()
+                    .and_then(|handle| {
+                        handle.block_on(async {
+                            yara_engine.scan_process(process, memory_regions).await
+                        })
+                    })
+                    .or_else(|_| {
+                        tokio::runtime::Runtime::new()
+                            .unwrap()
+                            .block_on(async {
+                                yara_engine.scan_process(process, memory_regions).await
+                            })
+                    })
+            {
+                if !yara_result.matches.is_empty() {
+                    log::info!(
+                        "YARA scan found {} matches in {} ms",
+                        yara_result.matches.len(),
+                        yara_result.scan_time_ms
+                    );
+
+                    for yara_match in &yara_result.matches {
+                        indicators.push(format!(
+                            "YARA: {} matched at {:#x} (threat level: {:?})",
+                            yara_match.rule_name, yara_match.offset, yara_match.threat_level
+                        ));
+
+                        // Adjust confidence based on threat level
+                        let threat_boost = match yara_match.threat_level {
+                            crate::yara_engine::ThreatLevel::Critical => 0.8,
+                            crate::yara_engine::ThreatLevel::High => 0.6,
+                            crate::yara_engine::ThreatLevel::Medium => 0.4,
+                            crate::yara_engine::ThreatLevel::Low => 0.2,
+                            crate::yara_engine::ThreatLevel::Info => 0.1,
+                        };
+                        confidence += threat_boost;
+                    }
+                }
+            }
         }
 
         // ML-based anomaly detection
