@@ -286,8 +286,8 @@ mod platform {
     ) -> Result<super::ThreadHijackingResult> {
         use windows::Win32::System::Kernel::GetThreadContext;
         use windows::Win32::System::Threading::{
-            OpenProcess, ResumeThread, SuspendThread, PROCESS_QUERY_INFORMATION,
-            PROCESS_VM_READ, THREAD_GET_CONTEXT, THREAD_SUSPEND_RESUME,
+            OpenProcess, ResumeThread, SuspendThread, PROCESS_QUERY_INFORMATION, PROCESS_VM_READ,
+            THREAD_GET_CONTEXT, THREAD_SUSPEND_RESUME,
         };
 
         let threads = enumerate_threads(pid)?;
@@ -610,12 +610,9 @@ mod platform {
 
     /// Detect hardware breakpoints by examining debug registers (DR0-DR7)
     pub fn detect_hardware_breakpoints(pid: u32) -> Result<super::HardwareBreakpointResult> {
-        use windows::Win32::System::Kernel::{
-            GetThreadContext, CONTEXT, CONTEXT_DEBUG_REGISTERS,
-        };
+        use windows::Win32::System::Kernel::{GetThreadContext, CONTEXT, CONTEXT_DEBUG_REGISTERS};
         use windows::Win32::System::Threading::{
-            ResumeThread, SuspendThread, THREAD_GET_CONTEXT,
-            THREAD_SUSPEND_RESUME,
+            ResumeThread, SuspendThread, THREAD_GET_CONTEXT, THREAD_SUSPEND_RESUME,
         };
 
         let threads = enumerate_threads(pid)?;
