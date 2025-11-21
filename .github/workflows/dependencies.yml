@@ -24,7 +24,7 @@ jobs:
         run: cargo update
 
       - name: Create Pull Request
-        uses: peter-evans/create-pull-request@v5
+        uses: peter-evans/create-pull-request@v7
         with:
           commit-message: Update Cargo dependencies
           title: 'chore: update Cargo dependencies'
