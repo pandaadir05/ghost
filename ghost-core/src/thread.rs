@@ -284,8 +284,9 @@ mod platform {
         pid: u32,
         memory_regions: &[crate::MemoryRegion],
     ) -> Result<super::ThreadHijackingResult> {
+        use windows::Win32::System::Kernel::GetThreadContext;
         use windows::Win32::System::Threading::{
-            GetThreadContext, OpenProcess, ResumeThread, SuspendThread, PROCESS_QUERY_INFORMATION,
+            OpenProcess, ResumeThread, SuspendThread, PROCESS_QUERY_INFORMATION,
             PROCESS_VM_READ, THREAD_GET_CONTEXT, THREAD_SUSPEND_RESUME,
         };
 
@@ -320,8 +321,7 @@ mod platform {
                     // Get thread context (registers)
                     #[cfg(target_arch = "x86_64")]
                     {
-                        use windows::Win32::System::Diagnostics::Debug::CONTEXT;
-                        use windows::Win32::System::Diagnostics::Debug::CONTEXT_CONTROL;
+                        use windows::Win32::System::Kernel::{CONTEXT, CONTEXT_CONTROL};
 
                         let mut context = CONTEXT {
                             ContextFlags: CONTEXT_CONTROL,
@@ -513,7 +513,7 @@ mod platform {
                     // Check if thread start address is suspicious (common for APC injection)
                     if thread.start_address != 0 {
                         // Check common APC entry points
-                        let suspicious_start_patterns = [
+                        let _suspicious_start_patterns = [
                             "ntdll!LdrInitializeThunk",
                             "ntdll!RtlUserThreadStart",
                             "kernel32!BaseThreadInitThunk",
@@ -610,10 +610,11 @@ mod platform {
 
     /// Detect hardware breakpoints by examining debug registers (DR0-DR7)
     pub fn detect_hardware_breakpoints(pid: u32) -> Result<super::HardwareBreakpointResult> {
-        use windows::Win32::System::Diagnostics::Debug::CONTEXT;
-        use windows::Win32::System::Diagnostics::Debug::CONTEXT_DEBUG_REGISTERS;
+        use windows::Win32::System::Kernel::{
+            GetThreadContext, CONTEXT, CONTEXT_DEBUG_REGISTERS,
+        };
         use windows::Win32::System::Threading::{
-            GetThreadContext, ResumeThread, SuspendThread, THREAD_GET_CONTEXT,
+            ResumeThread, SuspendThread, THREAD_GET_CONTEXT,
             THREAD_SUSPEND_RESUME,
         };
 

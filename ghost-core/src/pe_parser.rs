@@ -7,6 +7,8 @@
 //! - Function address resolution
 use crate::{GhostError, Result};
 use serde::{Deserialize, Serialize};
+#[cfg(windows)]
+use std::collections::HashMap;
 
 /// PE data directory indices
 pub const IMAGE_DIRECTORY_ENTRY_EXPORT: usize = 0;
@@ -113,7 +115,7 @@ pub fn parse_iat_from_memory(
     // Read PE signature and file header
     let _pe_sig = read_u32(pid, nt_header_addr, &memory_reader)?;
     let file_header_addr = nt_header_addr + 4;
-    let file_header = read_file_header(pid, file_header_addr, &memory_reader)?;
+    let _file_header = read_file_header(pid, file_header_addr, &memory_reader)?;
 
     // Read optional header magic to determine if 32-bit or 64-bit
     let opt_header_addr = file_header_addr + mem::size_of::<crate::memory::ImageFileHeader>();
