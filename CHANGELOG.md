@@ -62,5 +62,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Professional codebase structure
 - Clean compilation on all platforms
 
-[Unreleased]: https://github.com/YOUR_USERNAME/ghost/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/YOUR_USERNAME/ghost/releases/tag/v0.1.0
+[Unreleased]: https://github.com/pandaadir05/ghost/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/pandaadir05/ghost/releases/tag/v0.1.0

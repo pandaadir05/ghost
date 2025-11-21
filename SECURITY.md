@@ -1,45 +1,30 @@
-# Security Policy
+# Security
 
-## Supported Versions
+## What's supported
 
-| Version | Supported          |
-| ------- | ------------------ |
-| 0.1.x   | :white_check_mark: |
+Version 0.1.x gets security updates. That's it for now.
 
-## Authorized Use
+## Use this responsibly
 
-Ghost is designed for:
-- Authorized security testing
-- Defensive security operations  
-- CTF challenges
-- Security research and education
+Ghost is for:
+- Testing your own systems
+- Defensive security work
+- CTF competitions
+- Security research and learning
 
-## Reporting Vulnerabilities
+Don't use it on systems you don't own or don't have permission to test.
 
-**Do NOT** open public issues for security vulnerabilities.
+## Found a vulnerability?
 
-Contact: Create a private security advisory on GitHub
+Don't open a public issue. Create a private security advisory on GitHub instead.
 
-### Response Timeline
+I'll respond within 48 hours. Critical stuff gets fixed in a week, other issues within a month.
 
-- Acknowledgment: 48 hours
-- Initial assessment: 1 week
-- Critical fixes: 7 days
-- High priority: 30 days
+## Stuff to know
 
-## Security Best Practices
+- Advanced malware can evade this
+- Kernel rootkits are invisible to userspace tools
+- Each platform has its own limitations
+- Running this on production systems has overhead
 
-- Test only in authorized environments
-- Run with minimum privileges
-- Keep Ghost updated
-- Sanitize logs before sharing
-- Follow responsible disclosure
-
-## Known Limitations
-
-- Advanced malware may evade detection
-- Kernel rootkits not detectable
-- Platform-specific limitations
-- Performance overhead on production systems
-
-Thank you for helping keep Ghost secure!
+Keep Ghost updated and test only where you're allowed.

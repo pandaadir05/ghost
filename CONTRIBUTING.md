@@ -1,40 +1,46 @@
-# Contributing to Ghost
+# Contributing
 
-Thank you for your interest in contributing to Ghost!
+Thanks for wanting to help out.
 
-## Getting Started
+## Quick start
 
-1. Fork the repository
-2. Clone your fork
-3. Create a branch: `git checkout -b feature/your-feature`
-4. Make changes and test: `cargo test --all`
-5. Format code: `cargo fmt --all`
-6. Check lints: `cargo clippy --all`
-7. Commit: `git commit -m "feat: description"`
-8. Push and open a Pull Request
+1. Fork the repo
+2. Clone it: `git clone your-fork-url`
+3. Make a branch: `git checkout -b your-feature`
+4. Code, test, commit
+5. Push and open a PR
 
-## Code Style
+## Before you commit
 
-- Follow Rust conventions
-- Use rustfmt and clippy
-- Write clear, documented code
+Run these:
+```bash
+cargo fmt --all
+cargo clippy --all -- -D warnings
+cargo test --all
+```
+
+If stuff fails, fix it before pushing.
+
+## Commit messages
+
+Keep them short and clear:
+- `feat: add new detection method`
+- `fix: crash when scanning process 0`
+- `docs: update README examples`
+
+## What needs work
+
+- macOS support is barely there
+- Tests could use more coverage
+- Documentation always needs updates
+- Performance optimizations
+- More detection techniques
+
+## Code guidelines
+
+- Write Rust that doesn't suck
+- Document weird stuff
 - Add tests for new features
+- Don't break existing functionality
 
-## Commit Messages
-
-Use conventional commits:
-- `feat:` New feature
-- `fix:` Bug fix
-- `docs:` Documentation
-- `refactor:` Code refactoring
-- `test:` Tests
-
-## Areas for Contribution
-
-- macOS support
-- Threat intelligence feeds
-- eBPF implementation
-- Test coverage
-- Documentation
-
-Thank you for contributing!
+That's it. Keep it simple.

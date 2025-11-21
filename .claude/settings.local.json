@@ -24,7 +24,8 @@
       "Bash(rustup override unset:*)",
       "Bash(Select-String -Pattern \"Checking|Finished|error\")",
       "Bash(Select-Object -First 20)",
-      "Bash(git restore:*)"
+      "Bash(git restore:*)",
+      "Bash(test:*)"
     ],
     "deny": [],
     "ask": []
