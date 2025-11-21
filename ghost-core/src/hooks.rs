@@ -404,7 +404,9 @@ mod platform {
                 // Create memory reader closure
                 let memory_reader = |pid: u32, addr: usize, size: usize| -> Result<Vec<u8>> {
                     let handle = OpenProcess(PROCESS_VM_READ, false, pid).map_err(|e| {
-                        GhostError::MemoryRead { message: format!("OpenProcess failed: {}", e) }
+                        GhostError::MemoryRead {
+                            message: format!("OpenProcess failed: {}", e),
+                        }
                     })?;
 
                     let mut buffer = vec![0u8; size];
