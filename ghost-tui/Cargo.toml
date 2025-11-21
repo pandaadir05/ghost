@@ -17,5 +17,5 @@ env_logger.workspace = true
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 chrono = { version = "0.4", features = ["serde"] }
-tui-input = "0.8"
+tui-input = "0.14"
 unicode-width = "0.1"
