@@ -383,11 +383,7 @@ mod platform {
                 fn proc_pidpath(pid: c_int, buffer: *mut c_void, buffersize: u32) -> c_int;
             }
 
-            let ret = proc_pidpath(
-                pid as c_int,
-                buffer.as_mut_ptr() as *mut c_void,
-                size,
-            );
+            let ret = proc_pidpath(pid as c_int, buffer.as_mut_ptr() as *mut c_void, size);
 
             if ret > 0 {
                 let path_bytes = &buffer[..ret as usize];

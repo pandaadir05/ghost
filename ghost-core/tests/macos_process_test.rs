@@ -10,7 +10,10 @@ fn test_macos_process_enumeration() {
     println!("Found {} processes", processes.len());
 
     for proc in processes.iter().filter(|p| p.pid > 0).take(5) {
-        println!("PID: {}, Name: {}, Path: {:?}", proc.pid, proc.name, proc.path);
+        println!(
+            "PID: {}, Name: {}, Path: {:?}",
+            proc.pid, proc.name, proc.path
+        );
         assert!(proc.pid > 0, "PID should be positive");
         assert!(!proc.name.is_empty(), "Process name should not be empty");
     }
@@ -19,12 +22,21 @@ fn test_macos_process_enumeration() {
     let current_process = processes.iter().find(|p| p.pid == current_pid);
 
     if let Some(proc) = current_process {
-        println!("Current process found: PID={}, Name={}", proc.pid, proc.name);
+        println!(
+            "Current process found: PID={}, Name={}",
+            proc.pid, proc.name
+        );
     } else {
-        println!("Current process (PID={}) not in list - this is OK for test processes", current_pid);
+        println!(
+            "Current process (PID={}) not in list - this is OK for test processes",
+            current_pid
+        );
     }
 
-    assert!(processes.iter().any(|p| p.pid == 1), "Should at least find launchd (PID 1)");
+    assert!(
+        processes.iter().any(|p| p.pid == 1),
+        "Should at least find launchd (PID 1)"
+    );
 }
 
 #[cfg(target_os = "macos")]

@@ -1,4 +1,4 @@
-use ghost_core::{AnomalyDetector, ProcessInfo, MemoryRegion, MemoryProtection};
+use ghost_core::{AnomalyDetector, MemoryProtection, MemoryRegion, ProcessInfo};
 use std::path::PathBuf;
 
 #[test]
@@ -53,14 +53,12 @@ fn test_anomaly_analysis() {
         thread_count: 5,
     };
 
-    let regions = vec![
-        MemoryRegion {
-            base_address: 0x1000,
-            size: 4096,
-            protection: MemoryProtection::ReadExecute,
-            region_type: "IMAGE".to_string(),
-        },
-    ];
+    let regions = vec![MemoryRegion {
+        base_address: 0x1000,
+        size: 4096,
+        protection: MemoryProtection::ReadExecute,
+        region_type: "IMAGE".to_string(),
+    }];
 
     let features = detector.extract_features(&process, &regions, None);
 
@@ -84,14 +82,12 @@ fn test_profile_persistence() {
         thread_count: 5,
     };
 
-    let regions = vec![
-        MemoryRegion {
-            base_address: 0x1000,
-            size: 4096,
-            protection: MemoryProtection::ReadExecute,
-            region_type: "IMAGE".to_string(),
-        },
-    ];
+    let regions = vec![MemoryRegion {
+        base_address: 0x1000,
+        size: 4096,
+        protection: MemoryProtection::ReadExecute,
+        region_type: "IMAGE".to_string(),
+    }];
 
     for _ in 0..15 {
         let features = detector.extract_features(&process, &regions, None);
@@ -101,11 +97,19 @@ fn test_profile_persistence() {
     let temp_path = PathBuf::from("/tmp/ghost_test_profiles.json");
 
     let save_result = detector.save_profiles(&temp_path);
-    assert!(save_result.is_ok(), "Failed to save profiles: {:?}", save_result.err());
+    assert!(
+        save_result.is_ok(),
+        "Failed to save profiles: {:?}",
+        save_result.err()
+    );
 
     let mut detector2 = AnomalyDetector::new();
     let load_result = detector2.load_profiles(&temp_path);
-    assert!(load_result.is_ok(), "Failed to load profiles: {:?}", load_result.err());
+    assert!(
+        load_result.is_ok(),
+        "Failed to load profiles: {:?}",
+        load_result.err()
+    );
 
     assert!(!detector2.get_all_profiles().is_empty());
 
@@ -125,14 +129,12 @@ fn test_global_baseline_computation() {
             thread_count: 5,
         };
 
-        let regions = vec![
-            MemoryRegion {
-                base_address: 0x1000,
-                size: 4096,
-                protection: MemoryProtection::ReadExecute,
-                region_type: "IMAGE".to_string(),
-            },
-        ];
+        let regions = vec![MemoryRegion {
+            base_address: 0x1000,
+            size: 4096,
+            protection: MemoryProtection::ReadExecute,
+            region_type: "IMAGE".to_string(),
+        }];
 
         for _ in 0..15 {
             let features = detector.extract_features(&process, &regions, None);
@@ -157,14 +159,12 @@ fn test_profile_cleanup() {
         thread_count: 5,
     };
 
-    let regions = vec![
-        MemoryRegion {
-            base_address: 0x1000,
-            size: 4096,
-            protection: MemoryProtection::ReadExecute,
-            region_type: "IMAGE".to_string(),
-        },
-    ];
+    let regions = vec![MemoryRegion {
+        base_address: 0x1000,
+        size: 4096,
+        protection: MemoryProtection::ReadExecute,
+        region_type: "IMAGE".to_string(),
+    }];
 
     for _ in 0..15 {
         let features = detector.extract_features(&process, &regions, None);

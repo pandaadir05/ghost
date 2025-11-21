@@ -216,7 +216,8 @@ impl DynamicYaraEngine {
     #[cfg(not(feature = "yara-scanning"))]
     pub fn compile_rules(&mut self) -> Result<usize, GhostError> {
         Err(GhostError::Configuration {
-            message: "YARA scanning is not enabled. Build with --features yara-scanning to enable.".to_string(),
+            message: "YARA scanning is not enabled. Build with --features yara-scanning to enable."
+                .to_string(),
         })
     }
 
@@ -330,7 +331,8 @@ impl DynamicYaraEngine {
         _memory_regions: &[MemoryRegion],
     ) -> Result<YaraScanResult, GhostError> {
         Err(GhostError::Configuration {
-            message: "YARA scanning is not enabled. Build with --features yara-scanning to enable.".to_string(),
+            message: "YARA scanning is not enabled. Build with --features yara-scanning to enable."
+                .to_string(),
         })
     }
 
