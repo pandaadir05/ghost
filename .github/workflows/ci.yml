@@ -231,10 +231,7 @@ jobs:
 
       - name: Build release (musl)
         if: matrix.target == 'x86_64-unknown-linux-musl'
-        run: cargo build --release --target ${{ matrix.target }} --no-default-features
-        env:
-          OPENSSL_STATIC: 1
-          OPENSSL_VENDORED: 1
+        run: cargo build --release --target ${{ matrix.target }} --no-default-features --features vendored-openssl
 
       - name: Build release (non-musl)
         if: matrix.target != 'x86_64-unknown-linux-musl'

@@ -8,6 +8,7 @@ license.workspace = true
 [features]
 default = []
 yara-scanning = ["yara"]
+vendored-openssl = ["reqwest/native-tls-vendored"]
 
 [dependencies]
 anyhow.workspace = true
