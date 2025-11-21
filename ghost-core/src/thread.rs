@@ -970,7 +970,7 @@ mod platform {
 /// # Platform Support
 ///
 /// - **Windows**: Uses CreateToolhelp32Snapshot with NtQueryInformationThread for start addresses.
-/// - **Linux**: Parses /proc/[pid]/task/ directory.
+/// - **Linux**: Parses /proc/\[pid\]/task/ directory.
 /// - **macOS**: Not yet implemented.
 ///
 /// # Returns
