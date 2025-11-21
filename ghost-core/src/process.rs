@@ -365,7 +365,10 @@ mod platform {
                     let path_bytes = &buffer[args_start..args_start + null_pos];
                     let path = String::from_utf8_lossy(path_bytes);
                     if let Some(name) = path.rsplit('/').next() {
-                        return Ok(name.to_string());
+                        let name = name.trim();
+                        if !name.is_empty() {
+                            return Ok(name.to_string());
+                        }
                     }
                 }
             }

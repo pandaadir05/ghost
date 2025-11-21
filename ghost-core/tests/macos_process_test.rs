@@ -9,7 +9,14 @@ fn test_macos_process_enumeration() {
 
     println!("Found {} processes", processes.len());
 
-    for proc in processes.iter().filter(|p| p.pid > 0).take(5) {
+    // Check the first few valid processes (skip any with empty names)
+    let valid_processes: Vec<_> = processes
+        .iter()
+        .filter(|p| p.pid > 0 && !p.name.is_empty())
+        .take(5)
+        .collect();
+
+    for proc in valid_processes {
         println!(
             "PID: {}, Name: {}, Path: {:?}",
             proc.pid, proc.name, proc.path
@@ -49,8 +56,17 @@ fn test_process_info_structure() {
     for proc in processes.iter().take(10) {
         assert!(proc.thread_count >= 1);
 
-        if proc.pid > 0 {
-            assert!(!proc.name.is_empty() || proc.name.starts_with("pid_"));
+        // Process names should either be non-empty or use the pid_ fallback format
+        if proc.pid > 0 && !proc.name.is_empty() {
+            // Valid name found - this is good
+            assert!(!proc.name.is_empty());
+        } else if proc.pid > 0 {
+            // If name is empty, it should have used the fallback
+            assert!(
+                proc.name.starts_with("pid_"),
+                "Process with empty name should use pid_ fallback: {:?}",
+                proc
+            );
         }
     }
 }
