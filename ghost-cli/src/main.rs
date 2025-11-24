@@ -8,6 +8,117 @@ use clap::{Arg, Command};
 use ghost_core::{memory, process, thread, DetectionConfig, DetectionEngine, ThreatLevel};
 use log::{debug, error, info, warn};
 use std::time::Instant;
+use std::process::Command as ProcessCommand;
+
+fn build_scan_args() -> Vec<Arg> {
+    vec![
+        Arg::new("format")
+            .short('f')
+            .long("format")
+            .value_name("FORMAT")
+            .help("Output format: table, json")
+            .default_value("table")
+            .value_parser(["table", "json", "csv"]),
+        Arg::new("verbose")
+            .short('v')
+            .long("verbose")
+            .help("Enable verbose output")
+            .action(clap::ArgAction::SetTrue),
+        Arg::new("pid")
+            .short('p')
+            .long("pid")
+            .value_name("PID")
+            .help("Target specific process ID"),
+        Arg::new("process")
+            .long("process")
+            .value_name("NAME")
+            .help("Target specific process name"),
+        Arg::new("output")
+            .short('o')
+            .long("output")
+            .value_name("FILE")
+            .help("Write output to file instead of stdout"),
+        Arg::new("debug")
+            .short('d')
+            .long("debug")
+            .action(clap::ArgAction::SetTrue)
+            .help("Enable debug logging"),
+        Arg::new("quiet")
+            .short('q')
+            .long("quiet")
+            .action(clap::ArgAction::SetTrue)
+            .help("Suppress all output except errors"),
+        Arg::new("config")
+            .short('c')
+            .long("config")
+            .value_name("FILE")
+            .help("Load configuration from file"),
+        Arg::new("mitre-analysis")
+            .long("mitre-analysis")
+            .action(clap::ArgAction::SetTrue)
+            .help("Enable MITRE ATT&CK framework analysis"),
+        Arg::new("mitre-stats")
+            .long("mitre-stats")
+            .action(clap::ArgAction::SetTrue)
+            .help("Show MITRE ATT&CK framework statistics"),
+    ]
+}
+
+fn build_fuzz_args() -> Vec<Arg> {
+    vec![
+        Arg::new("target")
+            .required(true)
+            .help("Target binary to fuzz"),
+        Arg::new("iterations")
+            .long("iterations")
+            .value_name("NUM")
+            .help("Maximum fuzzing iterations")
+            .default_value("10000"),
+        Arg::new("timeout")
+            .long("timeout")
+            .value_name("SECONDS")
+            .help("Execution timeout per test case")
+            .default_value("5"),
+        Arg::new("strategy")
+            .long("strategy")
+            .value_name("STRATEGY")
+            .help("Fuzzing strategy: generation, mutation, hybrid")
+            .default_value("hybrid")
+            .value_parser(["generation", "mutation", "hybrid"]),
+        Arg::new("corpus-dir")
+            .long("corpus-dir")
+            .value_name("DIR")
+            .help("Directory for corpus")
+            .default_value("output/corpus"),
+        Arg::new("crash-dir")
+            .long("crash-dir")
+            .value_name("DIR")
+            .help("Directory for crashes")
+            .default_value("output/crashes"),
+        Arg::new("seed")
+            .long("seed")
+            .value_name("NUM")
+            .help("Random seed")
+            .default_value("12345"),
+        Arg::new("enable-taint")
+            .long("enable-taint")
+            .action(clap::ArgAction::SetTrue)
+            .help("Enable taint tracking"),
+        Arg::new("enable-symbolic")
+            .long("enable-symbolic")
+            .action(clap::ArgAction::SetTrue)
+            .help("Enable symbolic execution"),
+        Arg::new("ebpf")
+            .long("ebpf")
+            .action(clap::ArgAction::SetTrue)
+            .help("Enable eBPF bytecode generation for fuzzing"),
+        Arg::new("ebpf-instructions")
+            .long("ebpf-instructions")
+            .value_name("NUM")
+            .help("Number of eBPF instructions to generate")
+            .default_value("10"),
+    ]
+}
 
 fn main() -> Result<()> {
     let matches = Command::new("ghost")
@@ -22,77 +133,27 @@ fn main() -> Result<()> {
                      1 - Suspicious processes found\n\
                      2 - Error occurred during scanning",
         )
-        .arg(
-            Arg::new("format")
-                .short('f')
-                .long("format")
-                .value_name("FORMAT")
-                .help("Output format: table, json")
-                .default_value("table")
-                .value_parser(["table", "json", "csv"]),
+        .subcommand_required(true)
+        .subcommand(
+            Command::new("scan")
+                .about("Scan for process injection")
+                .args(&build_scan_args())
         )
-        .arg(
-            Arg::new("verbose")
-                .short('v')
-                .long("verbose")
-                .help("Enable verbose output")
-                .action(clap::ArgAction::SetTrue),
-        )
-        .arg(
-            Arg::new("pid")
-                .short('p')
-                .long("pid")
-                .value_name("PID")
-                .help("Target specific process ID"),
-        )
-        .arg(
-            Arg::new("process")
-                .long("process")
-                .value_name("NAME")
-                .help("Target specific process name"),
-        )
-        .arg(
-            Arg::new("output")
-                .short('o')
-                .long("output")
-                .value_name("FILE")
-                .help("Write output to file instead of stdout"),
-        )
-        .arg(
-            Arg::new("debug")
-                .short('d')
-                .long("debug")
-                .action(clap::ArgAction::SetTrue)
-                .help("Enable debug logging"),
-        )
-        .arg(
-            Arg::new("quiet")
-                .short('q')
-                .long("quiet")
-                .action(clap::ArgAction::SetTrue)
-                .help("Suppress all output except errors"),
-        )
-        .arg(
-            Arg::new("config")
-                .short('c')
-                .long("config")
-                .value_name("FILE")
-                .help("Load configuration from file"),
-        )
-        .arg(
-            Arg::new("mitre-analysis")
-                .long("mitre-analysis")
-                .action(clap::ArgAction::SetTrue)
-                .help("Enable MITRE ATT&CK framework analysis"),
-        )
-        .arg(
-            Arg::new("mitre-stats")
-                .long("mitre-stats")
-                .action(clap::ArgAction::SetTrue)
-                .help("Show MITRE ATT&CK framework statistics"),
+        .subcommand(
+            Command::new("fuzz")
+                .about("Fuzz a target binary using VMDragonSlayer EBF fuzzer")
+                .args(&build_fuzz_args())
         )
         .get_matches();
 
+    match matches.subcommand() {
+        Some(("scan", sub_matches)) => run_scan(sub_matches),
+        Some(("fuzz", sub_matches)) => run_fuzz(sub_matches),
+        _ => unreachable!("clap should ensure we don't get here"),
+    }
+}
+
+fn run_scan(matches: &clap::ArgMatches) -> Result<()> {
     let debug_mode = matches.get_flag("debug");
     let quiet = matches.get_flag("quiet");
 
@@ -393,4 +454,83 @@ fn main() -> Result<()> {
 
     debug!("Exiting with code: {}", exit_code);
     std::process::exit(exit_code);
+}
+
+fn run_fuzz(matches: &clap::ArgMatches) -> Result<()> {
+    let target = matches.get_one::<String>("target").unwrap();
+    let iterations = matches.get_one::<String>("iterations").unwrap();
+    let timeout = matches.get_one::<String>("timeout").unwrap();
+    let strategy = matches.get_one::<String>("strategy").unwrap();
+    let corpus_dir = matches.get_one::<String>("corpus-dir").unwrap();
+    let crash_dir = matches.get_one::<String>("crash-dir").unwrap();
+    let seed = matches.get_one::<String>("seed").unwrap();
+    let enable_taint = matches.get_flag("enable-taint");
+    let enable_symbolic = matches.get_flag("enable-symbolic");
+    let enable_ebpf = matches.get_flag("ebpf");
+    let ebpf_instructions = matches.get_one::<String>("ebpf-instructions").unwrap();
+
+    println!("Starting eBPF fuzzing with VMDragonSlayer");
+    println!("Target: {}", target);
+    println!("Iterations: {}", iterations);
+    println!("Timeout: {}s", timeout);
+    println!("Strategy: {}", strategy);
+    println!("Corpus dir: {}", corpus_dir);
+    println!("Crash dir: {}", crash_dir);
+    println!("Seed: {}", seed);
+    println!("Taint tracking: {}", enable_taint);
+    println!("Symbolic execution: {}", enable_symbolic);
+    println!("eBPF mode: {}", enable_ebpf);
+    if enable_ebpf {
+        println!("eBPF instructions: {}", ebpf_instructions);
+    }
+    println!();
+
+    // Check if Python is available
+    let python_check = ProcessCommand::new("python3")
+        .arg("--version")
+        .output();
+
+    let python_cmd = if python_check.is_ok() {
+        "python3"
+    } else {
+        "python"
+    };
+
+    // Run the fuzzer
+    let mut cmd = ProcessCommand::new(python_cmd);
+    cmd.arg("VMDragonSlayer/examples/fuzzing_example.py")
+        .arg(target)
+        .arg("--iterations")
+        .arg(iterations)
+        .arg("--timeout")
+        .arg(timeout)
+        .arg("--strategy")
+        .arg(strategy)
+        .arg("--corpus-dir")
+        .arg(corpus_dir)
+        .arg("--crash-dir")
+        .arg(crash_dir)
+        .arg("--seed")
+        .arg(seed);
+
+    if enable_taint {
+        cmd.arg("--enable-taint");
+    }
+    if enable_symbolic {
+        cmd.arg("--enable-symbolic");
+    }
+    if enable_ebpf {
+        cmd.arg("--ebpf");
+        cmd.arg("--ebpf-instructions").arg(ebpf_instructions);
+    }
+
+    let status = cmd.status()?;
+
+    if status.success() {
+        println!("Fuzzing completed successfully");
+        Ok(())
+    } else {
+        eprintln!("Fuzzing failed with exit code: {}", status);
+        Err(anyhow::anyhow!("Fuzzer exited with code {}", status))
+    }
 }

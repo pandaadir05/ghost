@@ -1,0 +1,7 @@
+{
+  "iteration": 38,
+  "input_size": 3191,
+  "result": {
+    "crashed": true,
+    "timeout": false,
+    "coverage": 

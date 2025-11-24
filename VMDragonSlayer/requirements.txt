@@ -1,0 +1,2 @@
+# VMDragonSlayer Requirements
+# Core dependencies for framework functionality
