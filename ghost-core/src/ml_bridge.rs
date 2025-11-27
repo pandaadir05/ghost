@@ -7,10 +7,6 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
-#[cfg(feature = "neural-ml")]
-use pyo3::prelude::*;
-#[cfg(feature = "neural-ml")]
-use pyo3::types::{PyList, PyBytes};
 
 /// Result from ML model analysis
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -62,6 +58,7 @@ pub struct ModelPrediction {
 }
 
 /// ML Bridge for calling Python ML models
+#[derive(Debug)]
 pub struct MLBridge {
     model_dir: PathBuf,
     use_python: bool,
@@ -70,18 +67,18 @@ pub struct MLBridge {
 
 impl MLBridge {
     /// Create a new ML bridge
-    pub fn new(model_dir: Option<PathBuf>) -> Result<Self, GhostError> {
+    pub fn new(model_dir: Option<PathBuf>) -> Self {
         let model_dir = model_dir.unwrap_or_else(|| PathBuf::from("models"));
-        
+
         // Try to find Python
         let python_path = find_python();
         let use_python = python_path.is_some();
-        
-        Ok(MLBridge {
+
+        MLBridge {
             model_dir,
             use_python,
             python_path,
-        })
+        }
     }
     
     /// Analyze memory regions using ML models
@@ -91,20 +88,7 @@ impl MLBridge {
         memory_content: Option<&[Vec<u8>]>,
     ) -> Result<MLAnalysisResult, GhostError> {
         if self.use_python {
-            #[cfg(feature = "neural-ml")]
-            {
-                self.analyze_with_pyo3(memory_regions, memory_content)
-                    .await
-                    .or_else(|e| {
-                        log::warn!("PyO3 analysis failed: {}, falling back to subprocess", e);
-                        self.analyze_with_subprocess(memory_regions, memory_content).await
-                    })
-            }
-            
-            #[cfg(not(feature = "neural-ml"))]
-            {
-                self.analyze_with_subprocess(memory_regions, memory_content).await
-            }
+            self.analyze_with_subprocess(memory_regions, memory_content).await
         } else {
             // Fallback: return empty results
             log::warn!("Python not available, returning empty ML analysis");
@@ -119,27 +103,17 @@ impl MLBridge {
             })
         }
     }
-    
-    #[cfg(feature = "neural-ml")]
-    async fn analyze_with_pyo3(
-        &self,
-        memory_regions: &[MemoryRegion],
-        memory_content: Option<&[Vec<u8>]>,
-    ) -> Result<MLAnalysisResult, GhostError> {
-        // For now, always use subprocess approach as it's more reliable
-        // PyO3 integration can be added later if needed
-        self.analyze_with_subprocess(memory_regions, memory_content).await
-    }
-    
+
     async fn analyze_with_subprocess(
         &self,
         memory_regions: &[MemoryRegion],
         _memory_content: Option<&[Vec<u8>]>,
     ) -> Result<MLAnalysisResult, GhostError> {
         let python = self.python_path.as_ref()
-            .ok_or_else(|| GhostError::Other("Python not found".to_string()))?;
-        
-        // Create a temporary script or use the bridge module directly
+            .ok_or_else(|| GhostError::Configuration {
+                message: "Python interpreter not found for ML analysis".to_string()
+            })?;
+
         let script = format!(
             r#"
 import sys
@@ -147,21 +121,22 @@ import json
 sys.path.insert(0, '.')
 try:
     from ghost_ml.bridge.rust_bridge import GhostMLBridge
-    
     bridge = GhostMLBridge('{}')
     regions_json = sys.stdin.read()
     result = bridge.analyze_memory_regions(regions_json)
     print(result)
 except Exception as e:
+    import traceback
+    error_details = {{"error": str(e), "traceback": traceback.format_exc(), "threat_probability": 0.0, "detected_patterns": [], "evasion_techniques": [], "polymorphic_indicators": [], "memory_anomalies": [], "confidence_score": 0.0, "model_predictions": []}}
+    print(json.dumps(error_details), file=sys.stderr)
     print(json.dumps({{"error": str(e), "threat_probability": 0.0, "detected_patterns": [], "evasion_techniques": [], "polymorphic_indicators": [], "memory_anomalies": [], "confidence_score": 0.0, "model_predictions": []}}))
-    sys.exit(1)
+    sys.exit(0)
 "#,
             self.model_dir.to_string_lossy()
         );
         
         // Serialize memory regions
-        let regions_json = serde_json::to_string(memory_regions)
-            .map_err(|e| GhostError::Other(format!("JSON serialization failed: {}", e)))?;
+        let regions_json = serde_json::to_string(memory_regions)?;
         
         // Execute Python script in blocking task
         let python_path = python.clone();
@@ -175,37 +150,39 @@ except Exception as e:
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
-                .spawn()
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("Failed to spawn: {}", e)))?;
+                .spawn()?;
             
             // Write input
             if let Some(mut stdin) = child.stdin.take() {
-                stdin.write_all(regions_json_clone.as_bytes())
-                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("Failed to write stdin: {}", e)))?;
+                stdin.write_all(regions_json_clone.as_bytes())?;
             }
-            
-            let output = child.wait_with_output()
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("Failed to wait: {}", e)))?;
+
+            let output = child.wait_with_output()?;
             Ok::<_, std::io::Error>(output)
         })
         .await
-        .map_err(|e| GhostError::Other(format!("Task join error: {}", e)))?
-        .map_err(|e| GhostError::Other(format!("Failed to execute Python: {}", e)))?;
+        .map_err(|e| GhostError::Configuration {
+            message: format!("Failed to execute ML analysis task: {}", e)
+        })?
+        .map_err(|e| GhostError::Configuration {
+            message: format!("Python ML bridge execution failed: {}", e)
+        })?;
         
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(GhostError::Other(format!(
-                "Python script failed: {}",
-                stderr
-            )));
+            log::warn!("Python ML script failed: {}", stderr);
         }
         
         let stdout = String::from_utf8(output.stdout)
-            .map_err(|e| GhostError::Other(format!("Invalid UTF-8 in Python output: {}", e)))?;
+            .map_err(|e| GhostError::Serialization {
+                message: format!("Invalid UTF-8 in Python output: {}", e)
+            })?;
         
         // Parse result
         let analysis: MLAnalysisResult = serde_json::from_str(&stdout.trim())
-            .map_err(|e| GhostError::Other(format!("JSON deserialization failed: {} (output: {})", e, stdout)))?;
+            .map_err(|e| GhostError::Serialization {
+                message: format!("Failed to deserialize ML analysis result: {} (output: {})", e, stdout)
+            })?;
         
         Ok(analysis)
     }
@@ -229,11 +206,7 @@ fn find_python() -> Option<PathBuf> {
 
 impl Default for MLBridge {
     fn default() -> Self {
-        Self::new(None).unwrap_or_else(|_| MLBridge {
-            model_dir: PathBuf::from("models"),
-            use_python: false,
-            python_path: None,
-        })
+        Self::new(None)
     }
 }
 
