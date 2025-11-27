@@ -119,7 +119,7 @@ impl NeuralMemoryAnalyzer {
         Self::with_model_dir(None)
     }
 
-    pub fn with_model_dir(model_dir: Option<PathBuf>) -> Result<Self, GhostError> {
+    pub fn with_model_dir(_model_dir: Option<PathBuf>) -> Result<Self, GhostError> {
         let neural_networks = vec![
             NeuralNetwork {
                 network_id: "shellcode_cnn_v4".to_string(),
@@ -145,7 +145,7 @@ impl NeuralMemoryAnalyzer {
         ];
 
         #[cfg(feature = "neural-ml")]
-        let ml_bridge = Some(MLBridge::new(model_dir));
+        let ml_bridge = Some(MLBridge::new(_model_dir));
 
         Ok(NeuralMemoryAnalyzer {
             neural_networks,
@@ -276,6 +276,7 @@ impl NeuralMemoryAnalyzer {
         }
     }
 
+    #[allow(dead_code)]
     fn read_memory_content(
         &self,
         process: &ProcessInfo,
