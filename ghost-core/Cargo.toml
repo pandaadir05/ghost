@@ -24,7 +24,7 @@ chrono = { version = "0.4", features = ["serde"] }
 yara = { version = "0.28", optional = true }
 sha2 = "0.10"
 reqwest = { version = "0.11", features = ["json"] }
-pyo3 = { version = "0.20", optional = true, features = ["auto-initialize"] }
+pyo3 = { version = "0.24.1", optional = true, features = ["auto-initialize"] }
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.58", features = [
