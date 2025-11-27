@@ -61,6 +61,8 @@ pub mod hooks;
 pub mod live_feeds;
 pub mod memory;
 pub mod mitre_attack;
+#[cfg(feature = "neural-ml")]
+pub mod ml_bridge;
 pub mod ml_cloud;
 pub mod neural_memory;
 pub mod pe_parser;
