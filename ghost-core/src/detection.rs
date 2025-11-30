@@ -452,7 +452,7 @@ impl DetectionEngine {
     }
 
     /// Process eBPF detection events (Linux only)
-    #[cfg(target_os = "linux")]
+    #[cfg(all(target_os = "linux", feature = "ebpf-detection"))]
     pub fn process_ebpf_events(&mut self) -> Result<Vec<DetectionResult>, GhostError> {
         if let Some(ref mut ebpf_detector) = self.ebpf_detector {
             match ebpf_detector.process_events() {
@@ -493,7 +493,7 @@ impl DetectionEngine {
     }
 
     /// Get eBPF detector statistics (Linux only)
-    #[cfg(target_os = "linux")]
+    #[cfg(all(target_os = "linux", feature = "ebpf-detection"))]
     pub fn get_ebpf_statistics(&self) -> Option<crate::ebpf::EbpfStatistics> {
         self.ebpf_detector
             .as_ref()
