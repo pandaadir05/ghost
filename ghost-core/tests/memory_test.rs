@@ -91,7 +91,10 @@ mod tests {
     fn test_memory_protection_equality() {
         assert_eq!(MemoryProtection::ReadOnly, MemoryProtection::ReadOnly);
         assert_ne!(MemoryProtection::ReadOnly, MemoryProtection::ReadWrite);
-        assert_ne!(MemoryProtection::ReadExecute, MemoryProtection::ReadWriteExecute);
+        assert_ne!(
+            MemoryProtection::ReadExecute,
+            MemoryProtection::ReadWriteExecute
+        );
     }
 
     #[test]

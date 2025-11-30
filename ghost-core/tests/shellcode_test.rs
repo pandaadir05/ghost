@@ -18,8 +18,14 @@ mod tests {
         let shellcode = vec![0x64, 0x8B, 0x15, 0x30, 0x00, 0x00, 0x00];
 
         let detections = detector.scan_memory_region(&shellcode, 0x10000000);
-        assert!(!detections.is_empty(), "Should detect x86 PEB access pattern");
-        assert!(detections[0].signature_matches.iter().any(|s| s.contains("PEB")));
+        assert!(
+            !detections.is_empty(),
+            "Should detect x86 PEB access pattern"
+        );
+        assert!(detections[0]
+            .signature_matches
+            .iter()
+            .any(|s| s.contains("PEB")));
     }
 
     #[test]
@@ -30,7 +36,10 @@ mod tests {
         let shellcode = vec![0x65, 0x48, 0x8B, 0x04, 0x25, 0x60, 0x00, 0x00, 0x00];
 
         let detections = detector.scan_memory_region(&shellcode, 0x10000000);
-        assert!(!detections.is_empty(), "Should detect x64 PEB access pattern");
+        assert!(
+            !detections.is_empty(),
+            "Should detect x64 PEB access pattern"
+        );
     }
 
     #[test]
@@ -52,7 +61,10 @@ mod tests {
         let clean_data = vec![0x00; 256];
 
         let detections = detector.scan_memory_region(&clean_data, 0x10000000);
-        assert!(detections.is_empty(), "Clean data should not trigger detection");
+        assert!(
+            detections.is_empty(),
+            "Clean data should not trigger detection"
+        );
     }
 
     #[test]
@@ -73,7 +85,10 @@ mod tests {
         let detections = detector.scan_memory_region(&peb_pattern, 0x10000000);
 
         if !detections.is_empty() {
-            assert!(detections[0].confidence > 0.7, "PEB access should have high confidence");
+            assert!(
+                detections[0].confidence > 0.7,
+                "PEB access should have high confidence"
+            );
         }
     }
 
