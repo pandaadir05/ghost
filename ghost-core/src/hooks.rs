@@ -849,7 +849,7 @@ mod platform {
         for line in vmmap_output.lines() {
             // Look for dylib paths in vmmap output
             if line.contains(".dylib") && !line.trim().starts_with("MALLOC") {
-                if let Some(path_start) = line.rfind('/') {
+                if let Some(_path_start) = line.rfind('/') {
                     if let Some(path_section) = line[..line.len()].split_whitespace().last() {
                         if path_section.contains(".dylib") {
                             libraries.push(path_section.to_string());
