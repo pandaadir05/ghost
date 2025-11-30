@@ -748,9 +748,24 @@ mod platform {
     use crate::{GhostError, Result};
     use std::process::Command;
 
+    /// Critical system library functions commonly hooked on macOS.
+    const CRITICAL_APIS: &[(&str, &str)] = &[
+        ("libsystem_kernel.dylib", "mach_vm_allocate"),
+        ("libsystem_kernel.dylib", "mach_vm_write"),
+        ("libsystem_kernel.dylib", "mach_vm_protect"),
+        ("libsystem_kernel.dylib", "task_for_pid"),
+        ("libsystem_kernel.dylib", "thread_create"),
+        ("libsystem_c.dylib", "system"),
+        ("libsystem_c.dylib", "popen"),
+        ("libsystem_c.dylib", "execve"),
+        ("libdyld.dylib", "dlopen"),
+        ("libdyld.dylib", "dlsym"),
+    ];
+
     pub fn detect_hook_injection(target_pid: u32) -> Result<HookDetectionResult> {
         let mut hooks = Vec::new();
         let mut suspicious_count = 0;
+        let mut inline_hooks = 0;
 
         // Check for DYLD_INSERT_LIBRARIES in process environment
         if let Ok(dyld_hooks) = detect_dyld_insert_libraries(target_pid) {
@@ -758,12 +773,152 @@ mod platform {
             hooks.extend(dyld_hooks);
         }
 
+        // Detect inline hooks in critical APIs
+        match detect_inline_hooks(target_pid) {
+            Ok(inline) => {
+                inline_hooks = inline.len();
+                for hook in inline {
+                    suspicious_count += 1;
+                    hooks.push(hook);
+                }
+            }
+            Err(e) => {
+                log::debug!("Failed to detect inline hooks: {}", e);
+            }
+        }
+
         Ok(HookDetectionResult {
             hooks,
             suspicious_count,
             global_hooks: 0,
-            inline_hooks: 0,
+            inline_hooks,
         })
+    }
+
+    /// Detect inline hooks in critical macOS system functions.
+    /// TODO: Complete implementation requires function address resolution via dyld_info
+    fn detect_inline_hooks(target_pid: u32) -> Result<Vec<HookInfo>> {
+        let mut hooks = Vec::new();
+
+        // Get list of loaded libraries in target process
+        let loaded_libraries = get_loaded_libraries(target_pid)?;
+
+        // Check each critical API for hooks
+        for (lib_name, func_name) in CRITICAL_APIS {
+            // Check if the library is loaded in the target process
+            if !loaded_libraries.iter().any(|l| {
+                l.to_lowercase()
+                    .contains(&lib_name.to_lowercase().replace(".dylib", ""))
+            }) {
+                continue;
+            }
+
+            // Read the function's entry point bytes
+            if let Ok(entry_bytes) = read_function_entry(target_pid, lib_name, func_name) {
+                if let Some(target_addr) = detect_hook_pattern(&entry_bytes, 0) {
+                    hooks.push(HookInfo {
+                        hook_type: HookType::InlineHook,
+                        thread_id: 0,
+                        hook_proc: target_addr,
+                        original_address: 0,
+                        module_name: lib_name.to_string(),
+                        hooked_function: func_name.to_string(),
+                    });
+                }
+            }
+        }
+
+        Ok(hooks)
+    }
+
+    /// Get list of loaded libraries in a process using vmmap.
+    fn get_loaded_libraries(pid: u32) -> Result<Vec<String>> {
+        let output = Command::new("vmmap")
+            .args(&[&pid.to_string()])
+            .output()
+            .map_err(|e| GhostError::Detection {
+                message: format!("Failed to execute vmmap: {}", e),
+            })?;
+
+        if !output.status.success() {
+            return Ok(Vec::new());
+        }
+
+        let vmmap_output = String::from_utf8_lossy(&output.stdout);
+        let mut libraries = Vec::new();
+
+        for line in vmmap_output.lines() {
+            // Look for dylib paths in vmmap output
+            if line.contains(".dylib") && !line.trim().starts_with("MALLOC") {
+                if let Some(path_start) = line.rfind('/') {
+                    if let Some(path_section) = line[..line.len()].split_whitespace().last() {
+                        if path_section.contains(".dylib") {
+                            libraries.push(path_section.to_string());
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(libraries)
+    }
+
+    /// Read function entry point bytes from target process.
+    fn read_function_entry(_pid: u32, _lib_name: &str, _func_name: &str) -> Result<Vec<u8>> {
+        // TODO: Implement actual function address resolution using dyld_info
+        // and memory reading using mach_vm_read_overwrite
+        // For now, return empty to avoid false positives
+        Err(GhostError::Detection {
+            message: "Function entry reading not yet implemented on macOS".to_string(),
+        })
+    }
+
+    /// Detect hook patterns in instruction bytes.
+    fn detect_hook_pattern(bytes: &[u8], base_addr: usize) -> Option<usize> {
+        if bytes.len() < 5 {
+            return None;
+        }
+
+        // JMP rel32 (E9 xx xx xx xx) - Common on x86_64
+        if bytes[0] == 0xE9 {
+            let offset = i32::from_le_bytes([bytes[1], bytes[2], bytes[3], bytes[4]]);
+            let target = (base_addr as i64 + 5 + offset as i64) as usize;
+            return Some(target);
+        }
+
+        // JMP [rip+disp32] (FF 25 xx xx xx xx) - 64-bit indirect
+        if bytes.len() >= 6 && bytes[0] == 0xFF && bytes[1] == 0x25 {
+            return Some(0xFFFFFFFF);
+        }
+
+        // MOV RAX, imm64; JMP RAX (48 B8 ... FF E0)
+        if bytes.len() >= 12
+            && bytes[0] == 0x48
+            && bytes[1] == 0xB8
+            && bytes[10] == 0xFF
+            && bytes[11] == 0xE0
+        {
+            let target = u64::from_le_bytes([
+                bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7], bytes[8], bytes[9],
+            ]) as usize;
+            return Some(target);
+        }
+
+        // ARM64 branch instructions (Apple Silicon)
+        // B instruction (0x14000000 mask) - unconditional branch
+        if bytes.len() >= 4 {
+            let insn = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
+            // Check for B instruction (opcode 0b000101)
+            if (insn & 0xFC000000) == 0x14000000 {
+                return Some(0xFFFFFFFF);
+            }
+            // Check for BR instruction (branch to register)
+            if (insn & 0xFFFFFC1F) == 0xD61F0000 {
+                return Some(0xFFFFFFFF);
+            }
+        }
+
+        None
     }
 
     /// Detect DYLD_INSERT_LIBRARIES environment variable in process.
