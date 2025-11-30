@@ -796,7 +796,6 @@ mod platform {
     }
 
     /// Detect inline hooks in critical macOS system functions.
-    /// TODO: Complete implementation requires function address resolution via dyld_info
     fn detect_inline_hooks(target_pid: u32) -> Result<Vec<HookInfo>> {
         let mut hooks = Vec::new();
 
@@ -864,12 +863,119 @@ mod platform {
     }
 
     /// Read function entry point bytes from target process.
-    fn read_function_entry(_pid: u32, _lib_name: &str, _func_name: &str) -> Result<Vec<u8>> {
-        // TODO: Implement actual function address resolution using dyld_info
-        // and memory reading using mach_vm_read_overwrite
-        // For now, return empty to avoid false positives
+    fn read_function_entry(pid: u32, lib_name: &str, func_name: &str) -> Result<Vec<u8>> {
+        // Get the library's base address in the target process
+        let lib_base_addr = get_library_base_address(pid, lib_name)?;
+
+        // Get the function's offset within the library using nm
+        let func_offset = get_function_offset(lib_name, func_name)?;
+
+        // Calculate absolute address in target process
+        let func_addr = lib_base_addr + func_offset;
+
+        // Read first 32 bytes of the function (enough to detect hooks)
+        crate::memory::read_process_memory(pid, func_addr, 32).map_err(|e| GhostError::Detection {
+            message: format!("Failed to read function entry: {}", e),
+        })
+    }
+
+    /// Get the base address of a library in the target process using vmmap.
+    fn get_library_base_address(pid: u32, lib_name: &str) -> Result<usize> {
+        let output = Command::new("vmmap")
+            .args(&[&pid.to_string()])
+            .output()
+            .map_err(|e| GhostError::Detection {
+                message: format!("Failed to execute vmmap: {}", e),
+            })?;
+
+        if !output.status.success() {
+            return Err(GhostError::Detection {
+                message: "vmmap command failed".to_string(),
+            });
+        }
+
+        let vmmap_output = String::from_utf8_lossy(&output.stdout);
+
+        // Search for the library in vmmap output
+        for line in vmmap_output.lines() {
+            if line.contains(lib_name) {
+                // Parse the address from the line
+                // vmmap format: "region type      address-address    [ size]  perm/max  filename"
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                if parts.len() >= 2 {
+                    // Address is usually in format "0x123456-0x789abc"
+                    if let Some(addr_range) = parts.iter().find(|p| p.starts_with("0x")) {
+                        if let Some(base_addr) = addr_range.split('-').next() {
+                            if let Ok(addr) = usize::from_str_radix(&base_addr[2..], 16) {
+                                return Ok(addr);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         Err(GhostError::Detection {
-            message: "Function entry reading not yet implemented on macOS".to_string(),
+            message: format!("Library {} not found in process {}", lib_name, pid),
+        })
+    }
+
+    /// Get the offset of a function within a library using nm.
+    fn get_function_offset(lib_path: &str, func_name: &str) -> Result<usize> {
+        // Try to find the library in common system paths
+        let search_paths = [
+            format!("/usr/lib/system/{}", lib_path),
+            format!("/usr/lib/{}", lib_path),
+            format!("/System/Library/Frameworks/{}", lib_path),
+        ];
+
+        for path in &search_paths {
+            if std::path::Path::new(path).exists() {
+                return get_function_offset_from_file(path, func_name);
+            }
+        }
+
+        Err(GhostError::Detection {
+            message: format!("Library {} not found in system paths", lib_path),
+        })
+    }
+
+    /// Get function offset from a specific library file using nm.
+    fn get_function_offset_from_file(lib_path: &str, func_name: &str) -> Result<usize> {
+        let output = Command::new("nm")
+            .args(&["-g", lib_path])
+            .output()
+            .map_err(|e| GhostError::Detection {
+                message: format!("Failed to execute nm: {}", e),
+            })?;
+
+        if !output.status.success() {
+            return Err(GhostError::Detection {
+                message: "nm command failed".to_string(),
+            });
+        }
+
+        let nm_output = String::from_utf8_lossy(&output.stdout);
+
+        // Parse nm output: "address type symbol"
+        for line in nm_output.lines() {
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if parts.len() >= 3 {
+                let symbol = parts[2];
+                // nm shows symbols with leading underscore on macOS
+                let symbol_clean = symbol.trim_start_matches('_');
+
+                if symbol_clean == func_name {
+                    // Parse the address
+                    if let Ok(offset) = usize::from_str_radix(parts[0], 16) {
+                        return Ok(offset);
+                    }
+                }
+            }
+        }
+
+        Err(GhostError::Detection {
+            message: format!("Function {} not found in {}", func_name, lib_path),
         })
     }
 
