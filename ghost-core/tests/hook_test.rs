@@ -51,6 +51,22 @@ mod tests {
         assert_eq!(format!("{}", hook_type), "DYLD_INSERT_LIBRARIES");
     }
 
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn test_inline_hook_detection_framework() {
+        // Test that inline hook detection runs without crashing
+        let detector = HookDetector::new().expect("Failed to create detector");
+        let current_pid = std::process::id();
+
+        let result = detector.detect_hooks(current_pid);
+        assert!(result.is_ok());
+
+        // Inline hook detection framework should be present
+        // Even if it doesn't find hooks in the test process
+        let hook_result = result.unwrap();
+        assert_eq!(hook_result.inline_hooks, 0);
+    }
+
     #[cfg(not(target_os = "macos"))]
     #[test]
     fn test_hook_detector_on_current_platform() {
