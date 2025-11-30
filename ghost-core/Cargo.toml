@@ -10,6 +10,7 @@ default = []
 yara-scanning = ["yara"]
 vendored-openssl = ["reqwest/native-tls-vendored"]
 neural-ml = ["pyo3"]
+ebpf-detection = []  # eBPF detection on Linux (currently stub implementation)
 
 [dependencies]
 anyhow.workspace = true

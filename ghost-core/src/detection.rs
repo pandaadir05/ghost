@@ -4,7 +4,7 @@
 //! analysis techniques including memory scanning, shellcode detection,
 //! process hollowing detection, and behavioral anomaly analysis.
 
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", feature = "ebpf-detection"))]
 use crate::EbpfDetector;
 use crate::{
     detect_hook_injection, AnomalyDetector, DetectionConfig, DynamicYaraEngine, EvasionDetector,
@@ -68,7 +68,7 @@ pub struct DetectionEngine {
     mitre_engine: MitreAttackEngine,
     yara_engine: Option<DynamicYaraEngine>,
     _config: Option<DetectionConfig>,
-    #[cfg(target_os = "linux")]
+    #[cfg(all(target_os = "linux", feature = "ebpf-detection"))]
     ebpf_detector: Option<EbpfDetector>,
 }
 
@@ -126,7 +126,7 @@ impl DetectionEngine {
             }
         };
 
-        #[cfg(target_os = "linux")]
+        #[cfg(all(target_os = "linux", feature = "ebpf-detection"))]
         let ebpf_detector = match EbpfDetector::new() {
             Ok(mut detector) => {
                 if let Err(e) = detector.initialize() {
@@ -153,7 +153,7 @@ impl DetectionEngine {
             mitre_engine,
             yara_engine,
             _config: config,
-            #[cfg(target_os = "linux")]
+            #[cfg(all(target_os = "linux", feature = "ebpf-detection"))]
             ebpf_detector,
         })
     }

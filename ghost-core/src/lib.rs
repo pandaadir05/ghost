@@ -81,7 +81,7 @@ pub use behavioral_ml::{
 };
 pub use config::{DetectionConfig, ProcessFilter};
 pub use detection::{DetectionEngine, DetectionResult, ThreatLevel};
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", feature = "ebpf-detection"))]
 pub use ebpf::{EbpfDetector, EbpfError, EbpfEvent, EbpfStatistics};
 pub use error::{GhostError, Result};
 pub use evasion::{
