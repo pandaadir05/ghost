@@ -77,6 +77,20 @@ Detects JMP patches at the start of critical API functions.
 - LoadLibraryA, LoadLibraryW
 - SetWindowsHookExA, SetWindowsHookExW
 
+### DYLD_INSERT_LIBRARIES Detection (macOS)
+
+**MITRE ATT&CK**: T1055.001
+
+Detects dynamic library injection on macOS via the DYLD_INSERT_LIBRARIES environment variable.
+
+**Detection Logic**:
+- Read process environment variables using ps command
+- Parse DYLD_INSERT_LIBRARIES variable
+- Report each injected library path
+- Flag processes with this variable set
+
+**Platform**: macOS only
+
 ## Heuristic Analysis
 
 ### Confidence Scoring
@@ -130,7 +144,7 @@ Ghost uses weighted confidence scoring:
 - [x] Memory enumeration (mach_vm_region)
 - [x] Memory reading (mach_vm_read_overwrite)
 - [x] Thread enumeration (task_threads with thread_basic_info)
-- [ ] DYLD_INSERT_LIBRARIES detection
+- [x] DYLD_INSERT_LIBRARIES detection
 - [ ] task_for_pid monitoring
 - [ ] Mach port analysis
 

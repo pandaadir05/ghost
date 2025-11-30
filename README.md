@@ -111,7 +111,7 @@ High confidence doesn't always mean malware - some legit software does weird stu
 
 **Linux:** Functional core features. Process enumeration via procfs (`/proc`), memory reading, LD_PRELOAD detection, and ptrace-based injection detection work. eBPF support requires `ebpf-detection` feature flag and is currently a stub implementation.
 
-**macOS:** Partial support. Process enumeration, memory region enumeration, memory reading, and thread enumeration work using mach VM APIs. Hook detection is not yet implemented.
+**macOS:** Partial support. Process enumeration, memory region enumeration, memory reading, and thread enumeration work using mach VM APIs. DYLD_INSERT_LIBRARIES detection is implemented.
 
 ## Performance
 
@@ -135,7 +135,7 @@ This is a userspace tool with the following limitations:
 - **Machine learning features**: Neural network analysis and behavioral ML predictions are simulated and require trained models to be functional
 - **Threat intelligence**: The threat intelligence framework exists but has no active feed connections or IOC database
 - **False positives**: Legitimate software like game anti-cheat, debuggers, sandboxes, and browsers with JIT compilers may trigger detections due to their memory manipulation techniques
-- **macOS**: Limited functionality compared to Windows and Linux. Hook detection is not yet implemented
+- **macOS**: Limited hook detection compared to Windows and Linux. Currently supports DYLD_INSERT_LIBRARIES detection only
 - **Performance claims**: Documented performance metrics are targets and have not been validated through comprehensive benchmarks
 
 ## Documentation

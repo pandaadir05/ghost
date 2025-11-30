@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Comprehensive documentation of limitations and unimplemented features
 - Test coverage for shellcode detection (11 unit tests)
 - Test coverage for memory protection detection (11 unit tests)
+- DYLD_INSERT_LIBRARIES detection for macOS hook detection
 
 ### Fixed
 - Replaced simulated memory reading with real process memory access
@@ -27,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Clarified performance metrics are targets, not validated benchmarks
 - Updated technical documentation for implementation accuracy
 - macOS memory reading and thread enumeration now properly documented as implemented
+- macOS hook detection now documented as partially implemented with DYLD_INSERT_LIBRARIES support
 
 ## [0.1.0] - 2024-11-20
 
