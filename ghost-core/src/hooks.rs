@@ -23,6 +23,8 @@ pub enum HookType {
     LdLibraryPath,
     /// Ptrace-based injection (Linux).
     PtraceInjection,
+    /// DYLD_INSERT_LIBRARIES based library injection (macOS).
+    DyldInsertLibraries,
 }
 
 impl std::fmt::Display for HookType {
@@ -35,6 +37,7 @@ impl std::fmt::Display for HookType {
             Self::LdPreload => write!(f, "LD_PRELOAD"),
             Self::LdLibraryPath => write!(f, "LD_LIBRARY_PATH"),
             Self::PtraceInjection => write!(f, "PtraceInjection"),
+            Self::DyldInsertLibraries => write!(f, "DYLD_INSERT_LIBRARIES"),
         }
     }
 }
@@ -739,7 +742,81 @@ mod platform {
     }
 }
 
-#[cfg(not(any(windows, target_os = "linux")))]
+#[cfg(target_os = "macos")]
+mod platform {
+    use super::{HookDetectionResult, HookInfo, HookType};
+    use crate::{GhostError, Result};
+    use std::process::Command;
+
+    pub fn detect_hook_injection(target_pid: u32) -> Result<HookDetectionResult> {
+        let mut hooks = Vec::new();
+        let mut suspicious_count = 0;
+
+        // Check for DYLD_INSERT_LIBRARIES in process environment
+        if let Ok(dyld_hooks) = detect_dyld_insert_libraries(target_pid) {
+            suspicious_count += dyld_hooks.len();
+            hooks.extend(dyld_hooks);
+        }
+
+        Ok(HookDetectionResult {
+            hooks,
+            suspicious_count,
+            global_hooks: 0,
+            inline_hooks: 0,
+        })
+    }
+
+    /// Detect DYLD_INSERT_LIBRARIES environment variable in process.
+    fn detect_dyld_insert_libraries(pid: u32) -> Result<Vec<HookInfo>> {
+        // Use ps to get environment variables for the process
+        let output = Command::new("ps")
+            .args(&["-p", &pid.to_string(), "-wwE"])
+            .output()
+            .map_err(|e| GhostError::Detection {
+                message: format!("Failed to execute ps command: {}", e),
+            })?;
+
+        if !output.status.success() {
+            return Ok(Vec::new());
+        }
+
+        let env_output = String::from_utf8_lossy(&output.stdout);
+        let mut hooks = Vec::new();
+
+        // Parse environment variables from ps output
+        for line in env_output.lines().skip(1) {
+            // ps -E output includes environment variables
+            if line.contains("DYLD_INSERT_LIBRARIES=") {
+                if let Some(env_part) = line.split("DYLD_INSERT_LIBRARIES=").nth(1) {
+                    // Extract the library path (usually space-separated from next env var)
+                    let libraries = env_part.split_whitespace().next().unwrap_or("");
+
+                    // Multiple libraries can be separated by colons
+                    for lib in libraries.split(':') {
+                        if !lib.is_empty() {
+                            hooks.push(HookInfo {
+                                hook_type: HookType::DyldInsertLibraries,
+                                thread_id: 0,
+                                hook_proc: 0,
+                                original_address: 0,
+                                module_name: lib.to_string(),
+                                hooked_function: "DYLD_INSERT_LIBRARIES".to_string(),
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(hooks)
+    }
+
+    pub fn get_hook_type_name(_hook_type: u32) -> &'static str {
+        "MACOS_HOOK"
+    }
+}
+
+#[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
 mod platform {
     use super::HookDetectionResult;
     use crate::Result;
