@@ -67,6 +67,23 @@ cargo run --bin ghost-tui --release
 
 The TUI gives you a dashboard with live stats, detection history, and you can navigate around with keyboard shortcuts (Tab to switch views, Q to quit).
 
+## Optional Features
+
+Ghost supports optional features that can be enabled during build:
+
+```bash
+# YARA rule scanning (requires libyara)
+cargo build --features yara-scanning
+
+# Neural ML integration (requires Python and trained models)
+cargo build --features neural-ml
+
+# eBPF detection (Linux only, currently stub implementation)
+cargo build --features ebpf-detection
+```
+
+Note: ML features require trained models to function. See `ghost_ml/README.md` for training instructions.
+
 ## Configuration
 
 You can tweak behavior with a TOML config file. Check `examples/ghost.toml` for a starting point. You can enable/disable specific detection methods, set confidence thresholds, skip system processes, and control how often it scans.
@@ -90,11 +107,11 @@ High confidence doesn't always mean malware - some legit software does weird stu
 
 ## Platform differences
 
-**Windows:** Pretty much everything works. Process enumeration, memory reading, hook detection, PE validation, etc.
+**Windows:** Fully functional. Process enumeration, memory reading, hook detection, process hollowing detection, PE validation, and thread analysis all work.
 
-**Linux:** Works but relies on procfs (`/proc`). Can detect LD_PRELOAD shenanigans and ptrace-based injection. eBPF support is stubbed out for now.
+**Linux:** Functional core features. Process enumeration via procfs (`/proc`), memory reading, LD_PRELOAD detection, and ptrace-based injection detection work. eBPF support requires `ebpf-detection` feature flag and is currently a stub implementation.
 
-**macOS:** Basic process enumeration works. Memory reading is implemented but not as feature-complete as Windows. Some detection methods don't apply or aren't implemented yet.
+**macOS:** Partial support. Process enumeration and memory region enumeration work. Memory reading is implemented using mach VM APIs. Thread enumeration and hook detection are not yet implemented.
 
 ## Performance
 
@@ -112,11 +129,14 @@ The tool includes YARA rule integration. Rules are stored in the `rules/` direct
 
 ## Limitations
 
-This is a userspace tool. It can't see kernel-level manipulation without help (like a driver on Windows or eBPF on Linux - which isn't fully implemented yet).
+This is a userspace tool with the following limitations:
 
-Some legit programs will trigger false positives. For example, game anti-cheat software, debuggers, sandboxes, and even browsers with JIT compilers can show up as suspicious because they do memory tricks.
-
-macOS support is limited compared to Windows. Some advanced features just aren't there yet because the APIs are different and less documented.
+- **Kernel-level threats**: Cannot detect kernel rootkits or kernel-mode injection without kernel-level support (e.g., eBPF on Linux, which is currently a stub implementation)
+- **Machine learning features**: Neural network analysis and behavioral ML predictions are simulated and require trained models to be functional
+- **Threat intelligence**: The threat intelligence framework exists but has no active feed connections or IOC database
+- **False positives**: Legitimate software like game anti-cheat, debuggers, sandboxes, and browsers with JIT compilers may trigger detections due to their memory manipulation techniques
+- **macOS**: Limited functionality compared to Windows and Linux. Thread enumeration and hook detection are not yet implemented
+- **Performance claims**: Documented performance metrics are targets and have not been validated through comprehensive benchmarks
 
 ## Documentation
 
