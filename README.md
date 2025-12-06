@@ -99,6 +99,39 @@ skip_system_processes = true
 scan_interval_ms = 2000
 ```
 
+## Controlling Output Size
+
+By default, Ghost limits output to 10 indicators per detection and deduplicates similar findings. For large scans, you can further reduce output:
+
+**Command-line options:**
+
+```bash
+# Summary mode - outputs statistics instead of full details
+ghost-cli --summary
+
+# Limit indicators per detection
+ghost-cli --max-indicators 5
+
+# Only report malicious detections
+ghost-cli --min-threat-level malicious
+
+# Combine for minimal output
+ghost-cli --summary --quiet
+```
+
+**Configuration file:**
+
+```toml
+[output]
+verbosity = "minimal"          # minimal, normal, or verbose
+max_indicators_per_detection = 5
+min_threat_level = "suspicious"
+deduplicate_indicators = true
+summary_mode = true
+```
+
+This is useful when scanning many processes or running continuous monitoring where output files would otherwise grow too large.
+
 ## What the results mean
 
 When Ghost finds something suspicious, it assigns a threat level: Clean, Low, Medium, High, or Critical. This is based on how many indicators it found and how serious they are.
