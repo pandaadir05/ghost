@@ -65,6 +65,7 @@ pub mod mitre_attack;
 pub mod ml_bridge;
 pub mod ml_cloud;
 pub mod neural_memory;
+pub mod output;
 pub mod pe_parser;
 pub mod process;
 pub mod shellcode;
@@ -79,7 +80,7 @@ pub use behavioral_ml::{
     AdvancedBehavioralML, BehavioralAnalysisResult, BehavioralAnomaly, ModelConsensus,
     PredictedTechnique, RiskLevel, TemporalAnalysis,
 };
-pub use config::{DetectionConfig, ProcessFilter};
+pub use config::{DetectionConfig, OutputConfig, OutputVerbosity, ProcessFilter};
 pub use detection::{DetectionEngine, DetectionResult, ThreatLevel};
 #[cfg(all(target_os = "linux", feature = "ebpf-detection"))]
 pub use ebpf::{EbpfDetector, EbpfError, EbpfEvent, EbpfStatistics};
@@ -101,6 +102,7 @@ pub use neural_memory::{
     DetectedEvasion, DetectedPattern, EvasionCategory, MemoryAnomaly, NeuralAnalysisResult,
     NeuralInsights, NeuralMemoryAnalyzer, PatternType, PolymorphicIndicator,
 };
+pub use output::{FormattedDetection, FormattedOutput, OutputFormatter, ScanSummary};
 pub use pe_parser::{ExportEntry, IATHookResult, ImportEntry};
 pub use process::ProcessInfo;
 pub use shellcode::{ShellcodeDetection, ShellcodeDetector};
