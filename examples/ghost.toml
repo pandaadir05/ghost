@@ -51,3 +51,31 @@ system_processes = [
     "services.exe",
     "lsass.exe"
 ]
+
+# Output configuration for controlling verbosity and result size
+[output]
+# Verbosity level: "minimal", "normal", or "verbose"
+# - minimal: only critical findings and summary statistics
+# - normal: findings with limited indicators per detection (default)
+# - verbose: full indicator details and debug information
+verbosity = "normal"
+
+# Maximum number of indicators to include per detection (0 = unlimited)
+# Default: 10. Reducing this value significantly decreases output size.
+max_indicators_per_detection = 10
+
+# Only output detections at or above this threat level
+# Options: "clean", "suspicious", "malicious"
+# Uncomment to filter:
+# min_threat_level = "suspicious"
+
+# Deduplicate similar indicators within a detection
+deduplicate_indicators = true
+
+# Enable summary mode: outputs aggregated statistics instead of full details
+# This is the most effective way to reduce output size for large scans.
+summary_mode = false
+
+# Maximum total output size in bytes (0 = unlimited)
+# Output will be truncated after this limit.
+max_output_size = 0
