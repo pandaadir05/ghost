@@ -833,7 +833,7 @@ mod platform {
     /// Get list of loaded libraries in a process using vmmap.
     fn get_loaded_libraries(pid: u32) -> Result<Vec<String>> {
         let output = Command::new("vmmap")
-            .args(&[&pid.to_string()])
+            .args([&pid.to_string()])
             .output()
             .map_err(|e| GhostError::Detection {
                 message: format!("Failed to execute vmmap: {}", e),
@@ -882,7 +882,7 @@ mod platform {
     /// Get the base address of a library in the target process using vmmap.
     fn get_library_base_address(pid: u32, lib_name: &str) -> Result<usize> {
         let output = Command::new("vmmap")
-            .args(&[&pid.to_string()])
+            .args([&pid.to_string()])
             .output()
             .map_err(|e| GhostError::Detection {
                 message: format!("Failed to execute vmmap: {}", e),
@@ -943,7 +943,7 @@ mod platform {
     /// Get function offset from a specific library file using nm.
     fn get_function_offset_from_file(lib_path: &str, func_name: &str) -> Result<usize> {
         let output = Command::new("nm")
-            .args(&["-g", lib_path])
+            .args(["-g", lib_path])
             .output()
             .map_err(|e| GhostError::Detection {
                 message: format!("Failed to execute nm: {}", e),
@@ -1031,7 +1031,7 @@ mod platform {
     fn detect_dyld_insert_libraries(pid: u32) -> Result<Vec<HookInfo>> {
         // Use ps to get environment variables for the process
         let output = Command::new("ps")
-            .args(&["-p", &pid.to_string(), "-wwE"])
+            .args(["-p", &pid.to_string(), "-wwE"])
             .output()
             .map_err(|e| GhostError::Detection {
                 message: format!("Failed to execute ps command: {}", e),

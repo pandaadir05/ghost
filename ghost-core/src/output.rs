@@ -308,7 +308,10 @@ impl OutputFormatter {
 
                 result.push_str(&format!(
                     "[{}] {} (PID: {}) - Confidence: {:.1}%\n",
-                    level_str, detection.process_name, detection.pid, detection.confidence * 100.0
+                    level_str,
+                    detection.process_name,
+                    detection.pid,
+                    detection.confidence * 100.0
                 ));
 
                 if self.config.verbosity != OutputVerbosity::Minimal {

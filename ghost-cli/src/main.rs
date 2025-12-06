@@ -366,11 +366,8 @@ fn main() -> Result<()> {
 
     // Format output using OutputFormatter
     let formatter = OutputFormatter::new(output_config);
-    let formatted = formatter.format_results(
-        &detections,
-        scanned_count,
-        scan_duration.as_millis() as u64,
-    );
+    let formatted =
+        formatter.format_results(&detections, scanned_count, scan_duration.as_millis() as u64);
 
     let output_content = match format.as_str() {
         "json" => {
