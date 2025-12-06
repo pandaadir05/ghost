@@ -8,6 +8,65 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
 
+/// Output verbosity levels for controlling log and result detail.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum OutputVerbosity {
+    /// Minimal output: only critical findings and summary statistics.
+    Minimal,
+    /// Normal output: findings with limited indicators per detection.
+    #[default]
+    Normal,
+    /// Verbose output: full indicator details and debug information.
+    Verbose,
+}
+
+/// Output configuration for controlling result size and verbosity.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OutputConfig {
+    /// Output verbosity level.
+    #[serde(default)]
+    pub verbosity: OutputVerbosity,
+    /// Maximum number of indicators to include per detection (0 = unlimited).
+    #[serde(default = "OutputConfig::default_max_indicators")]
+    pub max_indicators_per_detection: usize,
+    /// Only output detections at or above this threat level.
+    #[serde(default)]
+    pub min_threat_level: Option<String>,
+    /// Deduplicate similar indicators within a detection.
+    #[serde(default = "OutputConfig::default_dedupe")]
+    pub deduplicate_indicators: bool,
+    /// Enable summary mode: outputs aggregated statistics instead of full details.
+    #[serde(default)]
+    pub summary_mode: bool,
+    /// Maximum total output size in bytes (0 = unlimited). Truncates after limit.
+    #[serde(default)]
+    pub max_output_size: usize,
+}
+
+impl OutputConfig {
+    fn default_max_indicators() -> usize {
+        10
+    }
+
+    fn default_dedupe() -> bool {
+        true
+    }
+}
+
+impl Default for OutputConfig {
+    fn default() -> Self {
+        Self {
+            verbosity: OutputVerbosity::Normal,
+            max_indicators_per_detection: 10,
+            min_threat_level: None,
+            deduplicate_indicators: true,
+            summary_mode: false,
+            max_output_size: 0,
+        }
+    }
+}
+
 /// Configuration options for the detection engine.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DetectionConfig {
@@ -33,6 +92,9 @@ pub struct DetectionConfig {
     pub scan_interval_ms: u64,
     /// Process filter configuration.
     pub process_filter: Option<ProcessFilter>,
+    /// Output configuration for controlling verbosity and result size.
+    #[serde(default)]
+    pub output: OutputConfig,
 }
 
 impl Default for DetectionConfig {
@@ -49,6 +111,7 @@ impl Default for DetectionConfig {
             mitre_mapping: true,
             scan_interval_ms: 2000,
             process_filter: None,
+            output: OutputConfig::default(),
         }
     }
 }
@@ -115,6 +178,7 @@ impl DetectionConfig {
             mitre_mapping: false,
             scan_interval_ms: 5000,
             process_filter: None,
+            output: OutputConfig::default(),
         }
     }
 
@@ -132,6 +196,24 @@ impl DetectionConfig {
             mitre_mapping: true,
             scan_interval_ms: 1000,
             process_filter: None,
+            output: OutputConfig {
+                verbosity: OutputVerbosity::Verbose,
+                max_indicators_per_detection: 0, // unlimited
+                ..OutputConfig::default()
+            },
+        }
+    }
+
+    /// Creates a configuration optimized for minimal output (summary only).
+    pub fn summary_mode() -> Self {
+        Self {
+            output: OutputConfig {
+                verbosity: OutputVerbosity::Minimal,
+                summary_mode: true,
+                max_indicators_per_detection: 3,
+                ..OutputConfig::default()
+            },
+            ..Self::default()
         }
     }
 }
