@@ -949,7 +949,7 @@ impl EbpfProgramManager {
 
     pub fn load_program(&mut self, program: EbpfProgramDefinition) -> Result<(), EbpfError> {
         // eBPF program loading logic
-        println!("Loading eBPF program: {}", program.name);
+        log::debug!("Loading eBPF program: {}", program.name);
         Ok(())
     }
 }

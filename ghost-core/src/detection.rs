@@ -483,7 +483,7 @@ impl DetectionEngine {
                     Ok(detection_results)
                 }
                 Err(e) => {
-                    eprintln!("eBPF event processing error: {:?}", e);
+                    log::error!("eBPF event processing error: {:?}", e);
                     Ok(Vec::new())
                 }
             }

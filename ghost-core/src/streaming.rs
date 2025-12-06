@@ -410,7 +410,7 @@ pub struct SmtpConfig {
 impl NotificationChannel for EmailChannel {
     fn send_notification(&self, notification: &Notification) -> Result<(), NotificationError> {
         // Email sending implementation would go here
-        println!("Sending email notification: {}", notification.title);
+        log::debug!("Sending email notification: {}", notification.title);
         Ok(())
     }
 
@@ -433,7 +433,7 @@ pub struct SlackChannel {
 impl NotificationChannel for SlackChannel {
     fn send_notification(&self, notification: &Notification) -> Result<(), NotificationError> {
         // Slack webhook implementation would go here
-        println!("Sending Slack notification: {}", notification.title);
+        log::debug!("Sending Slack notification: {}", notification.title);
         Ok(())
     }
 
@@ -457,7 +457,7 @@ pub struct WebhookChannel {
 impl NotificationChannel for WebhookChannel {
     fn send_notification(&self, notification: &Notification) -> Result<(), NotificationError> {
         // HTTP webhook implementation would go here
-        println!("Sending webhook notification: {}", notification.title);
+        log::debug!("Sending webhook notification: {}", notification.title);
         Ok(())
     }
 
@@ -498,7 +498,7 @@ pub struct SiemCredentials {
 impl NotificationChannel for SiemChannel {
     fn send_notification(&self, notification: &Notification) -> Result<(), NotificationError> {
         // SIEM integration implementation would go here
-        println!("Sending SIEM notification: {}", notification.title);
+        log::debug!("Sending SIEM notification: {}", notification.title);
         Ok(())
     }
 
@@ -643,7 +643,7 @@ impl EventStreamingSystem {
         &mut self,
         incident: CorrelatedIncident,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        println!("Correlated incident detected: {}", incident.title);
+        log::info!("Correlated incident detected: {}", incident.title);
 
         // Create alert for correlated incident
         let alert = Alert {
@@ -812,7 +812,7 @@ impl AlertManager {
     }
 
     pub async fn create_alert(&mut self, alert: Alert) -> Result<(), Box<dyn std::error::Error>> {
-        println!("Alert created: {} - {}", alert.alert_id, alert.title);
+        log::info!("Alert created: {} - {}", alert.alert_id, alert.title);
 
         let active_alert = ActiveAlert {
             alert: alert.clone(),
