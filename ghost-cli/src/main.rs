@@ -5,7 +5,10 @@
 
 use anyhow::Result;
 use clap::{Arg, Command};
-use ghost_core::{memory, process, thread, DetectionConfig, DetectionEngine, ThreatLevel};
+use ghost_core::{
+    memory, process, thread, DetectionConfig, DetectionEngine, OutputConfig, OutputFormatter,
+    OutputVerbosity, ThreatLevel,
+};
 use log::{debug, error, info, warn};
 use std::time::Instant;
 
@@ -91,6 +94,26 @@ fn main() -> Result<()> {
                 .action(clap::ArgAction::SetTrue)
                 .help("Show MITRE ATT&CK framework statistics"),
         )
+        .arg(
+            Arg::new("summary")
+                .long("summary")
+                .action(clap::ArgAction::SetTrue)
+                .help("Output summary statistics only (reduces output size significantly)"),
+        )
+        .arg(
+            Arg::new("max-indicators")
+                .long("max-indicators")
+                .value_name("COUNT")
+                .help("Maximum indicators per detection (default: 10, 0 = unlimited)")
+                .value_parser(clap::value_parser!(usize)),
+        )
+        .arg(
+            Arg::new("min-threat-level")
+                .long("min-threat-level")
+                .value_name("LEVEL")
+                .help("Minimum threat level to report: clean, suspicious, malicious")
+                .value_parser(["clean", "suspicious", "malicious"]),
+        )
         .get_matches();
 
     let debug_mode = matches.get_flag("debug");
@@ -123,13 +146,34 @@ fn main() -> Result<()> {
     let config_file = matches.get_one::<String>("config");
     let _mitre_analysis = matches.get_flag("mitre-analysis");
     let mitre_stats = matches.get_flag("mitre-stats");
+    let summary_mode = matches.get_flag("summary");
+    let max_indicators = matches.get_one::<usize>("max-indicators").copied();
+    let min_threat_level = matches.get_one::<String>("min-threat-level").cloned();
 
-    // Load configuration if specified
+    // Build output configuration from CLI flags
+    let output_config = OutputConfig {
+        verbosity: if verbose {
+            OutputVerbosity::Verbose
+        } else if quiet || summary_mode {
+            OutputVerbosity::Minimal
+        } else {
+            OutputVerbosity::Normal
+        },
+        max_indicators_per_detection: max_indicators.unwrap_or(10),
+        min_threat_level,
+        deduplicate_indicators: true,
+        summary_mode,
+        max_output_size: 0,
+    };
+
+    // Load configuration if specified, applying CLI output config
     let config = if let Some(config_path) = config_file {
         info!("Loading configuration from: {}", config_path);
         match DetectionConfig::load(config_path) {
-            Ok(cfg) => {
+            Ok(mut cfg) => {
                 debug!("Configuration loaded successfully");
+                // CLI flags override config file for output settings
+                cfg.output = output_config.clone();
                 Some(cfg)
             }
             Err(e) => {
@@ -141,12 +185,16 @@ fn main() -> Result<()> {
             }
         }
     } else {
-        None
+        // Create default config with CLI output settings
+        Some(DetectionConfig {
+            output: output_config.clone(),
+            ..DetectionConfig::default()
+        })
     };
 
     info!("Starting Ghost process injection detection");
-    debug!("Configuration - Format: {}, Verbose: {}, Quiet: {}, Target PID: {:?}, Target Process: {:?}, Config: {:?}", 
-           format, verbose, quiet, target_pid, target_process, config_file);
+    debug!("Configuration - Format: {}, Verbose: {}, Quiet: {}, Summary: {}, Target PID: {:?}, Target Process: {:?}", 
+           format, verbose, quiet, summary_mode, target_pid, target_process);
 
     if !quiet {
         println!(
@@ -155,7 +203,7 @@ fn main() -> Result<()> {
         );
     }
 
-    let _scan_start = Instant::now();
+    let scan_start = Instant::now();
     let mut engine = DetectionEngine::with_config(config).map_err(|e| {
         error!("Failed to initialize detection engine: {}", e);
         anyhow::anyhow!("Detection engine initialization failed: {}", e)
@@ -305,64 +353,40 @@ fn main() -> Result<()> {
 
     if verbose && error_count > 0 && !quiet {
         warn!("Scan completed with {} access errors", error_count);
-        println!("Scan completed with {} access errors", error_count);
     }
 
+    let scan_duration = scan_start.elapsed();
+
     info!(
-        "Scan completed: {} processes scanned, {} suspicious processes found",
+        "Scan completed: {} processes scanned, {} suspicious processes found in {}ms",
         scanned_count,
-        detections.len()
+        detections.len(),
+        scan_duration.as_millis()
     );
 
-    // Handle output
+    // Format output using OutputFormatter
+    let formatter = OutputFormatter::new(output_config);
+    let formatted = formatter.format_results(
+        &detections,
+        scanned_count,
+        scan_duration.as_millis() as u64,
+    );
+
     let output_content = match format.as_str() {
         "json" => {
-            if detections.is_empty() {
+            if formatted.summary.is_some() || !detections.is_empty() {
+                formatter.to_json(&formatted)
+            } else {
                 serde_json::json!({
                     "status": "clean",
                     "message": "No suspicious activity detected",
-                    "detections": []
-                })
-                .to_string()
-            } else {
-                serde_json::json!({
-                    "status": "suspicious",
-                    "message": format!("Found {} suspicious processes", detections.len()),
-                    "detections": &detections
+                    "processes_scanned": scanned_count,
+                    "scan_duration_ms": scan_duration.as_millis()
                 })
                 .to_string()
             }
         }
-        _ => {
-            // Default table format
-            if detections.is_empty() {
-                "No suspicious activity detected.".to_string()
-            } else {
-                let mut content = format!("Found {} suspicious processes:\n\n", detections.len());
-
-                for detection in &detections {
-                    let level_str = match detection.threat_level {
-                        ThreatLevel::Suspicious => "SUSPICIOUS",
-                        ThreatLevel::Malicious => "MALICIOUS",
-                        _ => "CLEAN",
-                    };
-
-                    content.push_str(&format!(
-                        "[{}] {} (PID: {}) - Confidence: {:.1}%\n",
-                        level_str,
-                        detection.process.name,
-                        detection.process.pid,
-                        detection.confidence * 100.0
-                    ));
-
-                    for indicator in &detection.indicators {
-                        content.push_str(&format!("  - {}\n", indicator));
-                    }
-                    content.push('\n');
-                }
-                content
-            }
-        }
+        _ => formatter.to_table(&formatted),
     };
 
     if let Some(output_path) = output_file {
@@ -374,6 +398,9 @@ fn main() -> Result<()> {
         file.write_all(output_content.as_bytes())?;
         if !quiet {
             println!("Results written to {}", output_path);
+            if formatted.truncated {
+                println!("Note: Output was truncated due to size limits");
+            }
         }
     } else {
         debug!("Writing results to stdout");
