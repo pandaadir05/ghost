@@ -5,39 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.2.0] - 2025-12-15
 
 ### Added
-- **Webhook alerts** for Slack, Discord, and generic HTTP endpoints (`--webhook URL`)
-- Auto-detection of webhook type from URL (slack.com, discord.com)
-- Custom webhook type override (`--webhook-type slack|discord|generic`)
-- Beautiful rich embeds for Slack and Discord notifications
-- Shell completions for Bash, Zsh, Fish, PowerShell, and Elvish (`ghost completions <shell>`)
-- TUI Threat Intel view with feed status, IOC list, and coverage stats
-- TUI Memory Analysis view with RWX detection, region breakdown, and real-time stats
-- Baseline mode for differential detection (`--save-baseline`, `--baseline`)
-- Compare current state against known-good baseline
-- Detect new threats, escalated threats, and new indicators since baseline
-- Watch mode (`--watch` / `-w`) for continuous real-time monitoring
-- Configurable scan interval (`--interval` / `-i`) for watch mode
-- Automatic deduplication of detections in watch mode (only alerts on new threats)
-- Graceful shutdown with Ctrl+C support in watch mode
-- Color-coded threat level output (red for malicious, yellow for suspicious)
-- Output size control with `--summary`, `--max-indicators`, `--min-threat-level` flags
+- Webhook alerts for Slack, Discord, and generic HTTP endpoints via `--webhook` flag
+- Auto-detection of webhook type from URL patterns
+- Custom webhook type override with `--webhook-type` option
+- Shell completions for Bash, Zsh, Fish, PowerShell, and Elvish
+- TUI Threat Intel view with feed status, IOC list, and coverage statistics
+- TUI Memory Analysis view with RWX detection and region breakdown
+- Baseline mode for differential detection with `--save-baseline` and `--baseline` flags
+- Watch mode for continuous real-time monitoring with `--watch` flag
+- Configurable scan interval with `--interval` option
+- Automatic deduplication of detections in watch mode
+- Graceful shutdown with Ctrl+C support
+- Color-coded threat level output
+- Output controls: `--summary`, `--max-indicators`, `--min-threat-level`
 - OutputFormatter module for result formatting and deduplication
-- Indicator deduplication to reduce redundant output
-- Summary mode for aggregated scan statistics
 - Output configuration section in config file
 
 ### Fixed
-- TUI not displaying on Windows (blank screen issue)
-- Terminal not restoring properly on crash/panic
+- TUI not displaying on Windows
+- Terminal not restoring properly on crash
 - Initial scan blocking TUI from rendering
-- Replaced println! with log macros for proper verbosity control
+- Replaced println with log macros for proper verbosity control
 
 ### Changed
-- Default max indicators per detection is now 10 (was unlimited)
-- TUI now draws immediately before background scanning starts
+- Default max indicators per detection reduced to 10
+- TUI renders immediately before background scanning starts
 - Scan errors no longer prevent TUI from starting
 
 ## [0.1.1] - 2024-12-06
@@ -97,6 +92,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Threat intelligence has no active feed connections
 - Performance claims not validated with benchmarks
 
-[Unreleased]: https://github.com/pandaadir05/ghost/compare/v0.1.1...HEAD
+[0.2.0]: https://github.com/pandaadir05/ghost/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/pandaadir05/ghost/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/pandaadir05/ghost/releases/tag/v0.1.0
