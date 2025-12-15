@@ -6,8 +6,8 @@
 use anyhow::Result;
 use clap::{Arg, Command};
 use ghost_core::{
-    memory, process, thread, DetectionConfig, DetectionEngine, DetectionResult, OutputConfig,
-    OutputFormatter, OutputVerbosity, ThreatLevel,
+    memory, process, thread, Baseline, DetectionConfig, DetectionEngine, DetectionResult,
+    OutputConfig, OutputFormatter, OutputVerbosity, ThreatLevel,
 };
 use log::{debug, error, info};
 use std::collections::HashSet;
@@ -345,6 +345,19 @@ fn main() -> Result<()> {
                 .help("Minimum threat level to report")
                 .value_parser(["clean", "suspicious", "malicious"]),
         )
+        .arg(
+            Arg::new("save-baseline")
+                .long("save-baseline")
+                .value_name("FILE")
+                .help("Save current state as baseline"),
+        )
+        .arg(
+            Arg::new("baseline")
+                .short('b')
+                .long("baseline")
+                .value_name("FILE")
+                .help("Compare against baseline file"),
+        )
         .get_matches();
 
     // Parse flags
@@ -366,6 +379,8 @@ fn main() -> Result<()> {
     let config_file = matches.get_one::<String>("config");
     let max_indicators = matches.get_one::<usize>("max-indicators").copied();
     let min_threat_level = matches.get_one::<String>("min-threat-level").cloned();
+    let save_baseline = matches.get_one::<String>("save-baseline").cloned();
+    let baseline_file = matches.get_one::<String>("baseline").cloned();
 
     // Set up logging
     let log_level = if debug_mode {
