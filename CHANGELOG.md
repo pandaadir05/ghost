@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Watch mode (`--watch` / `-w`) for continuous real-time monitoring
+- Configurable scan interval (`--interval` / `-i`) for watch mode
+- Automatic deduplication of detections in watch mode (only alerts on new threats)
+- Graceful shutdown with Ctrl+C support in watch mode
+- Color-coded threat level output (red for malicious, yellow for suspicious)
 - Output size control with `--summary`, `--max-indicators`, `--min-threat-level` flags
 - OutputFormatter module for result formatting and deduplication
 - Indicator deduplication to reduce redundant output

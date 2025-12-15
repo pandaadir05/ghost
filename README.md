@@ -60,6 +60,12 @@ cargo run --bin ghost-cli --release -- --format json
 
 # Use a config file
 cargo run --bin ghost-cli --release -- --config ghost.toml
+
+# Continuous monitoring mode
+cargo run --bin ghost-cli --release -- --watch
+
+# Watch with custom interval (10 seconds)
+cargo run --bin ghost-cli --release -- --watch --interval 10
 ```
 
 **TUI:**
@@ -134,6 +140,39 @@ summary_mode = true
 ```
 
 This is useful when scanning many processes or running continuous monitoring where output files would otherwise grow too large.
+
+## Watch Mode
+
+Watch mode lets you monitor your system continuously without having to run scans manually. It's useful for catching injection attempts as they happen.
+
+```bash
+# Start watching (default: 5 second interval)
+ghost-cli --watch
+
+# Custom interval
+ghost-cli --watch --interval 10
+
+# Watch specific process
+ghost-cli --watch --pid 1234
+
+# Quiet mode - only alerts on new detections
+ghost-cli --watch --quiet
+```
+
+When running in watch mode, Ghost:
+- Shows only **new** detections (ones it hasn't seen before)
+- Displays color-coded threat levels (red for malicious, yellow for suspicious)
+- Prints timestamps with each scan cycle
+- Gracefully shuts down on Ctrl+C
+
+Example output:
+```
+[14:32:15] Scan #1: clean (142 processes, 89ms)
+[14:32:20] Scan #2: 2 NEW detections! (2 total, 142 processes, 91ms)
+  [MALICIOUS] suspicious.exe (PID: 4521) - 87% confidence
+  [SUSPICIOUS] helper.dll (PID: 2201) - 54% confidence
+[14:32:25] Scan #3: 2 known threats (142 processes, 88ms)
+```
 
 ## What the results mean
 

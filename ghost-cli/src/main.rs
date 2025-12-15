@@ -6,11 +6,233 @@
 use anyhow::Result;
 use clap::{Arg, Command};
 use ghost_core::{
-    memory, process, thread, DetectionConfig, DetectionEngine, OutputConfig, OutputFormatter,
-    OutputVerbosity, ThreatLevel,
+    memory, process, thread, DetectionConfig, DetectionEngine, DetectionResult, OutputConfig,
+    OutputFormatter, OutputVerbosity, ThreatLevel,
 };
-use log::{debug, error, info, warn};
-use std::time::Instant;
+use log::{debug, error, info};
+use std::collections::HashSet;
+use std::io::{self, Write};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+/// Runs a single scan and returns results
+fn run_scan(
+    engine: &mut DetectionEngine,
+    target_pid: Option<u32>,
+    target_process: Option<&str>,
+    quiet: bool,
+    verbose: bool,
+) -> Result<(Vec<DetectionResult>, usize, usize, Duration)> {
+    let scan_start = Instant::now();
+
+    let processes = if let Some(pid) = target_pid {
+        info!("Targeting specific process ID: {}", pid);
+        let all_processes = process::enumerate_processes()?;
+        all_processes.into_iter().filter(|p| p.pid == pid).collect()
+    } else if let Some(name) = target_process {
+        info!("Targeting processes with name: {}", name);
+        let all_processes = process::enumerate_processes()?;
+        all_processes
+            .into_iter()
+            .filter(|p| p.name.to_lowercase().contains(&name.to_lowercase()))
+            .collect()
+    } else {
+        process::enumerate_processes()?
+    };
+
+    if !quiet {
+        println!("Scanning {} processes...", processes.len());
+    }
+
+    let mut detections = Vec::new();
+    let mut scanned_count = 0;
+    let mut error_count = 0;
+
+    for proc in &processes {
+        // Skip known safe system processes
+        if proc.name == "csrss.exe" || proc.name == "wininit.exe" || proc.name == "winlogon.exe" {
+            continue;
+        }
+
+        scanned_count += 1;
+
+        match memory::enumerate_memory_regions(proc.pid) {
+            Ok(regions) => {
+                let threads = thread::enumerate_threads(proc.pid).ok();
+                let result = engine.analyze_process(proc, &regions, threads.as_deref());
+
+                if result.threat_level != ThreatLevel::Clean {
+                    detections.push(result);
+                }
+            }
+            Err(e) => {
+                error_count += 1;
+                if verbose {
+                    debug!("Failed to scan {} (PID: {}): {}", proc.name, proc.pid, e);
+                }
+            }
+        }
+    }
+
+    let duration = scan_start.elapsed();
+    Ok((detections, scanned_count, error_count, duration))
+}
+
+/// Formats and outputs scan results
+fn output_results(
+    detections: &[DetectionResult],
+    scanned_count: usize,
+    duration: Duration,
+    formatter: &OutputFormatter,
+    format: &str,
+    output_file: Option<&str>,
+    quiet: bool,
+) -> Result<()> {
+    let formatted =
+        formatter.format_results(detections, scanned_count, duration.as_millis() as u64);
+
+    let output_content = match format {
+        "json" => {
+            if formatted.summary.is_some() || !detections.is_empty() {
+                formatter.to_json(&formatted)
+            } else {
+                serde_json::json!({
+                    "status": "clean",
+                    "message": "No suspicious activity detected",
+                    "processes_scanned": scanned_count,
+                    "scan_duration_ms": duration.as_millis()
+                })
+                .to_string()
+            }
+        }
+        _ => formatter.to_table(&formatted),
+    };
+
+    if let Some(path) = output_file {
+        use std::fs::File;
+        let mut file = File::create(path)?;
+        file.write_all(output_content.as_bytes())?;
+        if !quiet {
+            println!("Results written to {}", path);
+        }
+    } else if !quiet || !detections.is_empty() {
+        print!("{}", output_content);
+        io::stdout().flush()?;
+    }
+
+    Ok(())
+}
+
+/// Runs continuous monitoring mode
+fn run_watch_mode(
+    engine: &mut DetectionEngine,
+    target_pid: Option<u32>,
+    target_process: Option<&str>,
+    interval_secs: u64,
+    quiet: bool,
+    verbose: bool,
+    running: Arc<AtomicBool>,
+) -> Result<()> {
+    let mut seen_detections: HashSet<(u32, String)> = HashSet::new();
+    let mut scan_count = 0u64;
+
+    if !quiet {
+        println!("Starting watch mode (interval: {}s)", interval_secs);
+        println!("Press Ctrl+C to stop\n");
+    }
+
+    while running.load(Ordering::SeqCst) {
+        scan_count += 1;
+        let timestamp = chrono::Local::now().format("%H:%M:%S");
+
+        if !quiet {
+            print!("[{}] Scan #{}: ", timestamp, scan_count);
+            io::stdout().flush()?;
+        }
+
+        match run_scan(engine, target_pid, target_process, true, verbose) {
+            Ok((detections, scanned, errors, duration)) => {
+                // Filter to only new detections we haven't seen
+                let new_detections: Vec<_> = detections
+                    .iter()
+                    .filter(|d| {
+                        let key = (d.process.pid, d.process.name.clone());
+                        seen_detections.insert(key)
+                    })
+                    .collect();
+
+                if !quiet {
+                    if new_detections.is_empty() && detections.is_empty() {
+                        println!("clean ({} processes, {}ms)", scanned, duration.as_millis());
+                    } else if new_detections.is_empty() {
+                        println!(
+                            "{} known threats ({} processes, {}ms)",
+                            detections.len(),
+                            scanned,
+                            duration.as_millis()
+                        );
+                    } else {
+                        println!(
+                            "{} NEW detections! ({} total, {} processes, {}ms)",
+                            new_detections.len(),
+                            detections.len(),
+                            scanned,
+                            duration.as_millis()
+                        );
+                    }
+                }
+
+                // Print details for new detections
+                for detection in &new_detections {
+                    let level = match detection.threat_level {
+                        ThreatLevel::Malicious => "\x1b[31mMALICIOUS\x1b[0m",
+                        ThreatLevel::Suspicious => "\x1b[33mSUSPICIOUS\x1b[0m",
+                        ThreatLevel::Clean => "CLEAN",
+                    };
+
+                    println!(
+                        "  [{}] {} (PID: {}) - {:.0}% confidence",
+                        level,
+                        detection.process.name,
+                        detection.process.pid,
+                        detection.confidence * 100.0
+                    );
+
+                    if verbose {
+                        for indicator in detection.indicators.iter().take(3) {
+                            println!("    - {}", indicator);
+                        }
+                        if detection.indicators.len() > 3 {
+                            println!("    ... and {} more", detection.indicators.len() - 3);
+                        }
+                    }
+                }
+
+                if errors > 0 && verbose {
+                    debug!("{} processes couldn't be scanned", errors);
+                }
+            }
+            Err(e) => {
+                if !quiet {
+                    println!("error: {}", e);
+                }
+            }
+        }
+
+        // Wait for next interval, checking for shutdown every 100ms
+        let wait_until = Instant::now() + Duration::from_secs(interval_secs);
+        while Instant::now() < wait_until && running.load(Ordering::SeqCst) {
+            std::thread::sleep(Duration::from_millis(100));
+        }
+    }
+
+    if !quiet {
+        println!("\nWatch mode stopped. {} scans completed.", scan_count);
+    }
+
+    Ok(())
+}
 
 fn main() -> Result<()> {
     let matches = Command::new("ghost")
@@ -18,19 +240,18 @@ fn main() -> Result<()> {
         .about("Cross-Platform Process Injection Detection Framework")
         .long_about(
             "Ghost scans running processes for signs of code injection, \
-                     process hollowing, and other malicious techniques. \
-                     Supports Windows and Linux platforms with kernel-level monitoring.\n\n\
-                     Exit Codes:\n\
-                     0 - No suspicious activity detected\n\
-                     1 - Suspicious processes found\n\
-                     2 - Error occurred during scanning",
+             process hollowing, and other malicious techniques.\n\n\
+             Exit Codes:\n\
+             0 - No suspicious activity detected\n\
+             1 - Suspicious processes found\n\
+             2 - Error occurred during scanning",
         )
         .arg(
             Arg::new("format")
                 .short('f')
                 .long("format")
                 .value_name("FORMAT")
-                .help("Output format: table, json")
+                .help("Output format")
                 .default_value("table")
                 .value_parser(["table", "json", "csv"]),
         )
@@ -38,7 +259,7 @@ fn main() -> Result<()> {
             Arg::new("verbose")
                 .short('v')
                 .long("verbose")
-                .help("Enable verbose output")
+                .help("Show more details")
                 .action(clap::ArgAction::SetTrue),
         )
         .arg(
@@ -46,20 +267,20 @@ fn main() -> Result<()> {
                 .short('p')
                 .long("pid")
                 .value_name("PID")
-                .help("Target specific process ID"),
+                .help("Scan specific process ID"),
         )
         .arg(
             Arg::new("process")
                 .long("process")
                 .value_name("NAME")
-                .help("Target specific process name"),
+                .help("Scan processes matching name"),
         )
         .arg(
             Arg::new("output")
                 .short('o')
                 .long("output")
                 .value_name("FILE")
-                .help("Write output to file instead of stdout"),
+                .help("Write results to file"),
         )
         .arg(
             Arg::new("debug")
@@ -73,53 +294,80 @@ fn main() -> Result<()> {
                 .short('q')
                 .long("quiet")
                 .action(clap::ArgAction::SetTrue)
-                .help("Suppress all output except errors"),
+                .help("Minimal output"),
         )
         .arg(
             Arg::new("config")
                 .short('c')
                 .long("config")
                 .value_name("FILE")
-                .help("Load configuration from file"),
+                .help("Load config from file"),
         )
         .arg(
-            Arg::new("mitre-analysis")
-                .long("mitre-analysis")
+            Arg::new("watch")
+                .short('w')
+                .long("watch")
                 .action(clap::ArgAction::SetTrue)
-                .help("Enable MITRE ATT&CK framework analysis"),
+                .help("Continuous monitoring mode"),
+        )
+        .arg(
+            Arg::new("interval")
+                .short('i')
+                .long("interval")
+                .value_name("SECONDS")
+                .help("Scan interval for watch mode (default: 5)")
+                .default_value("5")
+                .value_parser(clap::value_parser!(u64)),
         )
         .arg(
             Arg::new("mitre-stats")
                 .long("mitre-stats")
                 .action(clap::ArgAction::SetTrue)
-                .help("Show MITRE ATT&CK framework statistics"),
+                .help("Show MITRE ATT&CK coverage"),
         )
         .arg(
             Arg::new("summary")
                 .long("summary")
                 .action(clap::ArgAction::SetTrue)
-                .help("Output summary statistics only (reduces output size significantly)"),
+                .help("Summary output only"),
         )
         .arg(
             Arg::new("max-indicators")
                 .long("max-indicators")
                 .value_name("COUNT")
-                .help("Maximum indicators per detection (default: 10, 0 = unlimited)")
+                .help("Max indicators per detection (default: 10)")
                 .value_parser(clap::value_parser!(usize)),
         )
         .arg(
             Arg::new("min-threat-level")
                 .long("min-threat-level")
                 .value_name("LEVEL")
-                .help("Minimum threat level to report: clean, suspicious, malicious")
+                .help("Minimum threat level to report")
                 .value_parser(["clean", "suspicious", "malicious"]),
         )
         .get_matches();
 
+    // Parse flags
     let debug_mode = matches.get_flag("debug");
     let quiet = matches.get_flag("quiet");
+    let verbose = matches.get_flag("verbose");
+    let watch_mode = matches.get_flag("watch");
+    let summary_mode = matches.get_flag("summary");
+    let mitre_stats = matches.get_flag("mitre-stats");
 
-    // Initialize logging based on flags
+    let format = matches.get_one::<String>("format").unwrap();
+    let interval = *matches.get_one::<u64>("interval").unwrap();
+    let target_pid = matches
+        .get_one::<String>("pid")
+        .map(|s| s.parse::<u32>())
+        .transpose()?;
+    let target_process = matches.get_one::<String>("process").cloned();
+    let output_file = matches.get_one::<String>("output").map(|s| s.as_str());
+    let config_file = matches.get_one::<String>("config");
+    let max_indicators = matches.get_one::<usize>("max-indicators").copied();
+    let min_threat_level = matches.get_one::<String>("min-threat-level").cloned();
+
+    // Set up logging
     let log_level = if debug_mode {
         log::LevelFilter::Debug
     } else if quiet {
@@ -130,27 +378,10 @@ fn main() -> Result<()> {
 
     env_logger::Builder::from_default_env()
         .filter_level(log_level)
+        .format_timestamp(None)
         .init();
 
-    if debug_mode {
-        debug!("Debug logging enabled");
-    }
-
-    let format = matches
-        .get_one::<String>("format")
-        .expect("format has default value");
-    let verbose = matches.get_flag("verbose");
-    let target_pid = matches.get_one::<String>("pid");
-    let target_process = matches.get_one::<String>("process");
-    let output_file = matches.get_one::<String>("output");
-    let config_file = matches.get_one::<String>("config");
-    let _mitre_analysis = matches.get_flag("mitre-analysis");
-    let mitre_stats = matches.get_flag("mitre-stats");
-    let summary_mode = matches.get_flag("summary");
-    let max_indicators = matches.get_one::<usize>("max-indicators").copied();
-    let min_threat_level = matches.get_one::<String>("min-threat-level").cloned();
-
-    // Build output configuration from CLI flags
+    // Build output config
     let output_config = OutputConfig {
         verbosity: if verbose {
             OutputVerbosity::Verbose
@@ -166,36 +397,26 @@ fn main() -> Result<()> {
         max_output_size: 0,
     };
 
-    // Load configuration if specified, applying CLI output config
-    let config = if let Some(config_path) = config_file {
-        info!("Loading configuration from: {}", config_path);
-        match DetectionConfig::load(config_path) {
+    // Load or create config
+    let config = if let Some(path) = config_file {
+        match DetectionConfig::load(path) {
             Ok(mut cfg) => {
-                debug!("Configuration loaded successfully");
-                // CLI flags override config file for output settings
                 cfg.output = output_config.clone();
-                Some(cfg)
+                cfg
             }
             Err(e) => {
-                error!("Failed to load configuration from {}: {}", config_path, e);
-                if !quiet {
-                    eprintln!("Error: Failed to load configuration: {}", e);
-                }
+                eprintln!("Failed to load config: {}", e);
                 return Err(e.into());
             }
         }
     } else {
-        // Create default config with CLI output settings
-        Some(DetectionConfig {
+        DetectionConfig {
             output: output_config.clone(),
             ..DetectionConfig::default()
-        })
+        }
     };
 
-    info!("Starting Ghost process injection detection");
-    debug!("Configuration - Format: {}, Verbose: {}, Quiet: {}, Summary: {}, Target PID: {:?}, Target Process: {:?}", 
-           format, verbose, quiet, summary_mode, target_pid, target_process);
-
+    // Print banner
     if !quiet {
         println!(
             "Ghost v{} - Process Injection Detection\n",
@@ -203,218 +424,85 @@ fn main() -> Result<()> {
         );
     }
 
-    let scan_start = Instant::now();
-    let mut engine = DetectionEngine::with_config(config).map_err(|e| {
-        error!("Failed to initialize detection engine: {}", e);
-        anyhow::anyhow!("Detection engine initialization failed: {}", e)
+    // Initialize engine
+    let mut engine = DetectionEngine::with_config(Some(config)).map_err(|e| {
+        error!("Failed to initialize: {}", e);
+        anyhow::anyhow!("{}", e)
     })?;
 
-    // Display MITRE ATT&CK statistics if requested
+    // Show MITRE stats if requested
     if mitre_stats {
-        if !quiet {
-            println!("MITRE ATT&CK Framework Statistics:");
-            println!("==================================");
-        }
-
         let (techniques, tactics, actors) = engine.get_mitre_stats();
-        if !quiet {
-            println!("Techniques: {}", techniques);
-            println!("Tactics: {}", tactics);
-            println!("Threat Actors: {}", actors);
-            println!("Matrix Version: 13.1");
-            println!("Framework Coverage:");
-            println!("  - Process Injection (T1055)");
-            println!("  - Process Hollowing (T1055.012)");
-            println!("  - Defense Evasion (TA0004)");
-            println!("  - Privilege Escalation (TA0005)");
-            println!("  - APT29 (Cozy Bear)");
-            println!();
-        }
+        println!("MITRE ATT&CK Coverage:");
+        println!("  Techniques: {}", techniques);
+        println!("  Tactics: {}", tactics);
+        println!("  Threat Actors: {}", actors);
+        println!();
 
-        // If only showing stats, exit here
-        if mitre_stats && target_pid.is_none() && target_process.is_none() {
+        if !watch_mode && target_pid.is_none() && target_process.is_none() {
             return Ok(());
         }
     }
 
-    let processes = if let Some(pid_str) = target_pid {
-        let pid: u32 = pid_str.parse().map_err(|e| {
-            error!("Invalid PID format '{}': {}", pid_str, e);
-            anyhow::anyhow!("Invalid PID format: {}", pid_str)
-        })?;
-        info!("Targeting specific process ID: {}", pid);
-
-        let all_processes = process::enumerate_processes()?;
-        let filtered: Vec<_> = all_processes.into_iter().filter(|p| p.pid == pid).collect();
-
-        if filtered.is_empty() {
-            warn!("No process found with PID {}", pid);
-            if !quiet {
-                println!("Warning: No process found with PID {}", pid);
-            }
-        } else {
-            debug!("Found target process: {}", filtered[0].name);
-        }
-        filtered
-    } else if let Some(process_name) = target_process {
-        info!("Targeting processes with name: {}", process_name);
-        let all_processes = process::enumerate_processes()?;
-        let filtered: Vec<_> = all_processes
-            .into_iter()
-            .filter(|p| p.name.to_lowercase().contains(&process_name.to_lowercase()))
-            .collect();
-
-        if filtered.is_empty() {
-            warn!("No processes found matching name: {}", process_name);
-            if !quiet {
-                println!(
-                    "Warning: No processes found matching name: {}",
-                    process_name
-                );
-            }
-        } else {
-            info!(
-                "Found {} processes matching name: {}",
-                filtered.len(),
-                process_name
-            );
-            debug!(
-                "Matching processes: {:?}",
-                filtered
-                    .iter()
-                    .map(|p| format!("{} ({})", p.name, p.pid))
-                    .collect::<Vec<_>>()
-            );
-        }
-        filtered
-    } else {
-        let all_processes = process::enumerate_processes()?;
-        info!(
-            "Enumerating all processes, found {} total",
-            all_processes.len()
-        );
-        all_processes
-    };
-
-    if !quiet {
-        println!("Scanning {} processes...\n", processes.len());
-    }
-
-    let mut detections = Vec::new();
-    let mut scanned_count = 0;
-    let mut error_count = 0;
-
-    for proc in &processes {
-        // Skip known safe system processes for performance
-        if proc.name == "csrss.exe" || proc.name == "wininit.exe" || proc.name == "winlogon.exe" {
-            debug!("Skipping safe system process: {}", proc.name);
-            continue;
-        }
-
-        scanned_count += 1;
-        debug!("Scanning process: {} (PID: {})", proc.name, proc.pid);
-
-        match memory::enumerate_memory_regions(proc.pid) {
-            Ok(regions) => {
-                debug!(
-                    "Found {} memory regions for process {}",
-                    regions.len(),
-                    proc.name
-                );
-                // Get thread information if available
-                let threads = thread::enumerate_threads(proc.pid).ok();
-                let result = engine.analyze_process(proc, &regions, threads.as_deref());
-
-                if result.threat_level != ThreatLevel::Clean {
-                    warn!(
-                        "Suspicious activity detected in process {} (PID: {})",
-                        proc.name, proc.pid
-                    );
-                    detections.push(result);
-                } else {
-                    debug!("Process {} (PID: {}) is clean", proc.name, proc.pid);
-                }
-            }
-            Err(e) => {
-                error_count += 1;
-                error!(
-                    "Failed to scan process {} (PID: {}): {}",
-                    proc.name, proc.pid, e
-                );
-                if verbose && !quiet {
-                    println!(
-                        "Warning: Could not scan process {} (PID: {})",
-                        proc.name, proc.pid
-                    );
-                }
-            }
-        }
-    }
-
-    if verbose && error_count > 0 && !quiet {
-        warn!("Scan completed with {} access errors", error_count);
-    }
-
-    let scan_duration = scan_start.elapsed();
-
-    info!(
-        "Scan completed: {} processes scanned, {} suspicious processes found in {}ms",
-        scanned_count,
-        detections.len(),
-        scan_duration.as_millis()
-    );
-
-    // Format output using OutputFormatter
     let formatter = OutputFormatter::new(output_config);
-    let formatted =
-        formatter.format_results(&detections, scanned_count, scan_duration.as_millis() as u64);
 
-    let output_content = match format.as_str() {
-        "json" => {
-            if formatted.summary.is_some() || !detections.is_empty() {
-                formatter.to_json(&formatted)
-            } else {
-                serde_json::json!({
-                    "status": "clean",
-                    "message": "No suspicious activity detected",
-                    "processes_scanned": scanned_count,
-                    "scan_duration_ms": scan_duration.as_millis()
-                })
-                .to_string()
-            }
-        }
-        _ => formatter.to_table(&formatted),
-    };
+    // Watch mode or single scan
+    if watch_mode {
+        // Set up Ctrl+C handler
+        let running = Arc::new(AtomicBool::new(true));
+        let r = running.clone();
 
-    if let Some(output_path) = output_file {
-        use std::fs::File;
-        use std::io::Write;
+        ctrlc::set_handler(move || {
+            r.store(false, Ordering::SeqCst);
+        })?;
 
-        info!("Writing results to file: {}", output_path);
-        let mut file = File::create(output_path)?;
-        file.write_all(output_content.as_bytes())?;
-        if !quiet {
-            println!("Results written to {}", output_path);
-            if formatted.truncated {
-                println!("Note: Output was truncated due to size limits");
-            }
-        }
+        run_watch_mode(
+            &mut engine,
+            target_pid,
+            target_process.as_deref(),
+            interval,
+            quiet,
+            verbose,
+            running,
+        )?;
+
+        Ok(())
     } else {
-        debug!("Writing results to stdout");
-        if !quiet || !detections.is_empty() {
-            print!("{}", output_content);
-        }
+        // Single scan
+        let (detections, scanned, errors, duration) = run_scan(
+            &mut engine,
+            target_pid,
+            target_process.as_deref(),
+            quiet,
+            verbose,
+        )?;
+
+        info!(
+            "Scan complete: {} processes, {} detections, {}ms",
+            scanned,
+            detections.len(),
+            duration.as_millis()
+        );
+
+        output_results(
+            &detections,
+            scanned,
+            duration,
+            &formatter,
+            format,
+            output_file,
+            quiet,
+        )?;
+
+        // Exit code
+        let code = if errors > 0 {
+            2
+        } else if !detections.is_empty() {
+            1
+        } else {
+            0
+        };
+
+        std::process::exit(code);
     }
-
-    // Exit with appropriate code for automation
-    let exit_code = if error_count > 0 {
-        2 // Error occurred during scanning
-    } else if !detections.is_empty() {
-        1 // Suspicious processes found
-    } else {
-        0 // Clean scan
-    };
-
-    debug!("Exiting with code: {}", exit_code);
-    std::process::exit(exit_code);
 }
