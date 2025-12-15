@@ -80,6 +80,17 @@ pub struct SystemStats {
     pub memory_usage_mb: f64,
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct MemoryStats {
+    pub total_regions: usize,
+    pub rwx_regions: usize,
+    pub private_regions: usize,
+    pub shared_regions: usize,
+    pub suspicious_allocations: usize,
+    pub largest_region_mb: f64,
+    pub total_committed_mb: f64,
+}
+
 #[derive(Debug)]
 pub struct App {
     pub current_tab: TabIndex,
@@ -89,6 +100,7 @@ pub struct App {
     pub detections: VecDeque<DetectionEvent>,
     pub logs: VecDeque<String>,
     pub stats: SystemStats,
+    pub memory_stats: MemoryStats,
     pub threat_intel_data: ThreatIntelData,
     pub last_scan: Option<Instant>,
 
@@ -142,6 +154,7 @@ impl App {
                 scan_time_ms: 0,
                 memory_usage_mb: 0.0,
             },
+            memory_stats: MemoryStats::default(),
             threat_intel_data: ThreatIntelData {
                 total_iocs: 0,
                 recent_iocs: Vec::new(),
@@ -189,6 +202,14 @@ impl App {
         let mut suspicious_count = 0;
         let mut malicious_count = 0;
 
+        // Memory stats tracking
+        let mut total_regions = 0usize;
+        let mut rwx_regions = 0usize;
+        let mut private_regions = 0usize;
+        let mut suspicious_allocations = 0usize;
+        let mut largest_region: u64 = 0;
+        let mut total_committed: u64 = 0;
+
         let processes = self.processes.clone();
         for proc in &processes {
             if Self::should_skip_process(proc) {
@@ -199,6 +220,30 @@ impl App {
                 Ok(r) => r,
                 Err(_) => continue,
             };
+
+            // Collect memory statistics
+            for region in &regions {
+                total_regions += 1;
+                total_committed += region.size as u64;
+                if region.size as u64 > largest_region {
+                    largest_region = region.size as u64;
+                }
+
+                // Check for RWX (read-write-execute) - suspicious
+                if region.protection.is_readable()
+                    && region.protection.is_writable()
+                    && region.protection.is_executable()
+                {
+                    rwx_regions += 1;
+                    suspicious_allocations += 1;
+                }
+
+                // Private vs shared - check region type
+                if region.region_type.contains("PRIVATE") || region.region_type.contains("private")
+                {
+                    private_regions += 1;
+                }
+            }
 
             let threads = thread::enumerate_threads(proc.pid).ok();
             let result = self
@@ -233,6 +278,16 @@ impl App {
             total_detections: self.detections.len(),
             scan_time_ms: scan_duration.as_millis() as u64,
             memory_usage_mb: self.estimate_memory_usage(),
+        };
+
+        self.memory_stats = MemoryStats {
+            total_regions,
+            rwx_regions,
+            private_regions,
+            shared_regions: total_regions.saturating_sub(private_regions),
+            suspicious_allocations,
+            largest_region_mb: largest_region as f64 / 1024.0 / 1024.0,
+            total_committed_mb: total_committed as f64 / 1024.0 / 1024.0,
         };
 
         self.last_scan = Some(scan_start);
