@@ -76,6 +76,22 @@ cargo run --bin ghost-tui --release
 
 The TUI gives you a dashboard with live stats, detection history, and you can navigate around with keyboard shortcuts (Tab to switch views, Q to quit).
 
+## Shell Completions
+
+Ghost supports tab completion for Bash, Zsh, Fish, PowerShell, and Elvish.
+
+```bash
+# Generate completions for your shell
+ghost completions bash > /etc/bash_completion.d/ghost
+ghost completions zsh > ~/.zfunc/_ghost
+ghost completions fish > ~/.config/fish/completions/ghost.fish
+
+# Or use the install script
+./completions/install.sh
+```
+
+See `completions/README.md` for detailed installation instructions.
+
 ## Optional Features
 
 Ghost supports optional features that can be enabled during build:

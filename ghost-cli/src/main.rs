@@ -4,7 +4,8 @@
 //! process hollowing, and other malicious code injection techniques.
 
 use anyhow::Result;
-use clap::{Arg, Command};
+use clap::{Arg, Command, ValueHint};
+use clap_complete::{generate, Shell};
 use ghost_core::{
     memory, process, thread, Baseline, DetectionConfig, DetectionEngine, DetectionResult,
     OutputConfig, OutputFormatter, OutputVerbosity, ThreatLevel,
@@ -254,8 +255,9 @@ fn run_watch_mode(
     Ok(())
 }
 
-fn main() -> Result<()> {
-    let matches = Command::new("ghost")
+/// Builds the CLI command structure
+fn build_cli() -> Command {
+    Command::new("ghost")
         .version(env!("CARGO_PKG_VERSION"))
         .about("Cross-Platform Process Injection Detection Framework")
         .long_about(
@@ -265,6 +267,16 @@ fn main() -> Result<()> {
              0 - No suspicious activity detected\n\
              1 - Suspicious processes found\n\
              2 - Error occurred during scanning",
+        )
+        .subcommand(
+            Command::new("completions")
+                .about("Generate shell completions")
+                .arg(
+                    Arg::new("shell")
+                        .required(true)
+                        .value_parser(["bash", "zsh", "fish", "powershell", "elvish"])
+                        .help("Shell to generate completions for"),
+                ),
         )
         .arg(
             Arg::new("format")
@@ -300,6 +312,7 @@ fn main() -> Result<()> {
                 .short('o')
                 .long("output")
                 .value_name("FILE")
+                .value_hint(ValueHint::FilePath)
                 .help("Write results to file"),
         )
         .arg(
@@ -321,6 +334,7 @@ fn main() -> Result<()> {
                 .short('c')
                 .long("config")
                 .value_name("FILE")
+                .value_hint(ValueHint::FilePath)
                 .help("Load config from file"),
         )
         .arg(
@@ -369,6 +383,7 @@ fn main() -> Result<()> {
             Arg::new("save-baseline")
                 .long("save-baseline")
                 .value_name("FILE")
+                .value_hint(ValueHint::FilePath)
                 .help("Save current state as baseline"),
         )
         .arg(
@@ -376,9 +391,29 @@ fn main() -> Result<()> {
                 .short('b')
                 .long("baseline")
                 .value_name("FILE")
+                .value_hint(ValueHint::FilePath)
                 .help("Compare against baseline file"),
         )
-        .get_matches();
+}
+
+fn main() -> Result<()> {
+    let matches = build_cli().get_matches();
+
+    // Handle completions subcommand
+    if let Some(sub) = matches.subcommand_matches("completions") {
+        let shell = sub.get_one::<String>("shell").unwrap();
+        let shell = match shell.as_str() {
+            "bash" => Shell::Bash,
+            "zsh" => Shell::Zsh,
+            "fish" => Shell::Fish,
+            "powershell" => Shell::PowerShell,
+            "elvish" => Shell::Elvish,
+            _ => unreachable!(),
+        };
+        let mut cmd = build_cli();
+        generate(shell, &mut cmd, "ghost", &mut io::stdout());
+        return Ok(());
+    }
 
     // Parse flags
     let debug_mode = matches.get_flag("debug");

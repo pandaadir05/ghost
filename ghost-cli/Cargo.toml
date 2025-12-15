@@ -13,5 +13,6 @@ log.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 clap = { version = "4.0", features = ["derive"] }
+clap_complete = "4.5"
 ctrlc = "3.4"
 chrono = "0.4"

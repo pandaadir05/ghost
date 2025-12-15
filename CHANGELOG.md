@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Shell completions for Bash, Zsh, Fish, PowerShell, and Elvish (`ghost completions <shell>`)
+- TUI Threat Intel view with feed status, IOC list, and coverage stats
+- TUI Memory Analysis view with RWX detection, region breakdown, and real-time stats
 - Baseline mode for differential detection (`--save-baseline`, `--baseline`)
 - Compare current state against known-good baseline
 - Detect new threats, escalated threats, and new indicators since baseline
