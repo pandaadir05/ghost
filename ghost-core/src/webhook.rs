@@ -206,10 +206,10 @@ impl WebhookNotifier {
     }
 
     fn build_slack_payload(&self, detection: &DetectionResult, hostname: &str) -> String {
-        let (color, emoji) = match detection.threat_level {
-            ThreatLevel::Malicious => ("#ff0000", "🚨"),
-            ThreatLevel::Suspicious => ("#ffaa00", "⚠️"),
-            ThreatLevel::Clean => ("#00ff00", "✅"),
+        let color = match detection.threat_level {
+            ThreatLevel::Malicious => "#ff0000",
+            ThreatLevel::Suspicious => "#ffaa00",
+            ThreatLevel::Clean => "#00ff00",
         };
 
         let indicators_text = detection
@@ -223,8 +223,8 @@ impl WebhookNotifier {
         let attachment = SlackAttachment {
             color: color.to_string(),
             title: format!(
-                "{} {} (PID: {})",
-                emoji, detection.process.name, detection.process.pid
+                "{} (PID: {})",
+                detection.process.name, detection.process.pid
             ),
             text: indicators_text,
             fields: vec![
@@ -244,10 +244,7 @@ impl WebhookNotifier {
         };
 
         let message = SlackMessage {
-            text: format!(
-                "{} Ghost detected suspicious activity on *{}*",
-                emoji, hostname
-            ),
+            text: format!("Ghost detected suspicious activity on *{}*", hostname),
             attachments: vec![attachment],
         };
 
@@ -255,10 +252,10 @@ impl WebhookNotifier {
     }
 
     fn build_discord_payload(&self, detection: &DetectionResult, hostname: &str) -> String {
-        let (color, emoji) = match detection.threat_level {
-            ThreatLevel::Malicious => (0xff0000, "🚨"),
-            ThreatLevel::Suspicious => (0xffaa00, "⚠️"),
-            ThreatLevel::Clean => (0x00ff00, "✅"),
+        let color = match detection.threat_level {
+            ThreatLevel::Malicious => 0xff0000,
+            ThreatLevel::Suspicious => 0xffaa00,
+            ThreatLevel::Clean => 0x00ff00,
         };
 
         let indicators_text = detection
@@ -296,8 +293,8 @@ impl WebhookNotifier {
 
         let message = DiscordMessage {
             content: format!(
-                "{} **Ghost Alert**: Suspicious process detected on **{}**",
-                emoji, hostname
+                "**Ghost Alert**: Suspicious process detected on **{}**",
+                hostname
             ),
             embeds: vec![embed],
         };
