@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Baseline mode for differential detection (`--save-baseline`, `--baseline`)
+- Compare current state against known-good baseline
+- Detect new threats, escalated threats, and new indicators since baseline
 - Watch mode (`--watch` / `-w`) for continuous real-time monitoring
 - Configurable scan interval (`--interval` / `-i`) for watch mode
 - Automatic deduplication of detections in watch mode (only alerts on new threats)

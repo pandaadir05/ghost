@@ -174,6 +174,44 @@ Example output:
 [14:32:25] Scan #3: 2 known threats (142 processes, 88ms)
 ```
 
+## Baseline Mode
+
+Baseline mode captures a snapshot of your system's current state. Later scans can compare against this baseline to detect changes - useful for finding new threats without wading through known issues.
+
+```bash
+# Save current state as baseline
+ghost-cli --save-baseline baseline.json
+
+# Later: compare against baseline
+ghost-cli --baseline baseline.json
+
+# Combine with watch mode
+ghost-cli --watch --baseline baseline.json
+```
+
+When comparing against a baseline, Ghost reports:
+- **New threats**: Processes not in the baseline
+- **Escalated threats**: Processes whose threat level increased
+- **New indicators**: Known processes with new suspicious behaviors
+
+Example output:
+```
+3 changes from baseline:
+
+  New threats (1):
+    injector.exe (PID: 8821) - Malicious
+
+  Escalated threats (1):
+    helper.dll (PID: 2201): Suspicious -> Malicious
+
+  New indicators (1):
+    svchost.exe (PID: 1024):
+      - RWX memory region detected
+      - Shellcode pattern match
+```
+
+Exit code is 1 if changes are detected, 0 if clean.
+
 ## What the results mean
 
 When Ghost finds something suspicious, it assigns a threat level: Clean, Low, Medium, High, or Critical. This is based on how many indicators it found and how serious they are.
