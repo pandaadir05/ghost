@@ -197,7 +197,10 @@ impl WebhookNotifier {
         matches!(
             (&self.config.min_level, level),
             (ThreatLevel::Clean, _)
-                | (ThreatLevel::Suspicious, ThreatLevel::Suspicious | ThreatLevel::Malicious)
+                | (
+                    ThreatLevel::Suspicious,
+                    ThreatLevel::Suspicious | ThreatLevel::Malicious
+                )
                 | (ThreatLevel::Malicious, ThreatLevel::Malicious)
         )
     }
