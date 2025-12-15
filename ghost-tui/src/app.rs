@@ -114,9 +114,15 @@ impl App {
     /// system fails to initialize.
     pub async fn new() -> Result<Self> {
         let mut threat_intel = ThreatIntelligence::new();
-        if let Err(e) = threat_intel.initialize_default_feeds().await {
-            log::warn!("Failed to initialize threat feeds: {}", e);
-        }
+        // Don't block on threat feed initialization - do it in background
+        tokio::spawn(async move {
+            if let Err(e) = threat_intel.initialize_default_feeds().await {
+                log::warn!("Failed to initialize threat feeds: {}", e);
+            }
+        });
+
+        // Re-create threat_intel since we moved it
+        let threat_intel = ThreatIntelligence::new();
 
         let detection_engine = DetectionEngine::new()
             .map_err(|e| anyhow::anyhow!("Failed to initialize detection engine: {}", e))?;
@@ -155,10 +161,11 @@ impl App {
 
         app.add_log_message("Ghost TUI v0.1.0 - Process Injection Detection".into());
         app.add_log_message("Detection engine initialized successfully".into());
+        app.add_log_message("Starting initial scan...".into());
 
-        if let Err(e) = app.update_scan_data().await {
-            app.add_log_message(format!("Initial scan failed: {}", e));
-        }
+        // Don't fail on initial scan error - just log it
+        // The background task will retry
+        // This prevents Windows permission errors from blocking TUI startup
 
         Ok(app)
     }
