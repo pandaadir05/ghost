@@ -228,6 +228,56 @@ Example output:
 
 Exit code is 1 if changes are detected, 0 if clean.
 
+## Webhook Alerts
+
+Ghost can send real-time alerts to Slack, Discord, or any HTTP endpoint when threats are detected. Perfect for SOC integration or getting notified on your phone.
+
+```bash
+# Slack webhook
+ghost-cli --watch --webhook "https://hooks.slack.com/services/XXX/YYY/ZZZ"
+
+# Discord webhook
+ghost-cli --watch --webhook "https://discord.com/api/webhooks/123/abc"
+
+# Generic HTTP POST (JSON payload)
+ghost-cli --watch --webhook "https://your-siem.example.com/api/alerts"
+
+# Override auto-detected type
+ghost-cli --webhook "https://custom.url" --webhook-type slack
+```
+
+Ghost auto-detects the webhook type from the URL:
+- `hooks.slack.com` → Slack format with attachments
+- `discord.com/api/webhooks` → Discord format with embeds
+- Everything else → Generic JSON payload
+
+**Slack alerts** include color-coded attachments with threat level, confidence score, and top indicators:
+
+```
+🚨 Ghost detected suspicious activity on *prod-server-01*
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🚨 suspicious.exe (PID: 4521)
+• RWX memory region detected at 0x7ff...
+• Shellcode pattern: NOP sled
+Threat Level: Malicious | Confidence: 87%
+```
+
+**Discord alerts** use rich embeds with the same information in a clean format.
+
+**Generic webhooks** send a JSON payload:
+```json
+{
+  "event": "ghost.detection",
+  "timestamp": "2024-12-06T14:32:15Z",
+  "hostname": "prod-server-01",
+  "process_name": "suspicious.exe",
+  "pid": 4521,
+  "threat_level": "Malicious",
+  "confidence": 0.87,
+  "indicators": ["RWX memory region detected", "..."]
+}
+```
+
 ## What the results mean
 
 When Ghost finds something suspicious, it assigns a threat level: Clean, Low, Medium, High, or Critical. This is based on how many indicators it found and how serious they are.

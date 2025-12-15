@@ -780,9 +780,11 @@ dependencies = [
  "ctrlc",
  "env_logger",
  "ghost-core",
+ "hostname",
  "log",
  "serde",
  "serde_json",
+ "tokio",
 ]
 
 [[package]]

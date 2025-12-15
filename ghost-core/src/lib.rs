@@ -74,6 +74,7 @@ pub mod streaming;
 pub mod testing;
 pub mod thread;
 pub mod threat_intel;
+pub mod webhook;
 pub mod yara_engine;
 
 pub use anomaly::{AnomalyDetector, AnomalyScore, ProcessFeatures};
@@ -121,6 +122,7 @@ pub use threat_intel::{
     Campaign, IndicatorOfCompromise, IocType, SophisticationLevel, ThreatActor as ThreatIntelActor,
     ThreatContext, ThreatIntelligence,
 };
+pub use webhook::{AlertPayload, WebhookConfig, WebhookNotifier, WebhookType};
 pub use yara_engine::{
     DynamicYaraEngine, RuleMatch, ThreatLevel as YaraThreatLevel, YaraRuleMetadata, YaraScanResult,
 };

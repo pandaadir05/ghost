@@ -8,7 +8,8 @@ use clap::{Arg, Command, ValueHint};
 use clap_complete::{generate, Shell};
 use ghost_core::{
     memory, process, thread, Baseline, DetectionConfig, DetectionEngine, DetectionResult,
-    OutputConfig, OutputFormatter, OutputVerbosity, ThreatLevel,
+    OutputConfig, OutputFormatter, OutputVerbosity, ThreatLevel, WebhookConfig, WebhookNotifier,
+    WebhookType,
 };
 use log::{debug, error, info};
 use std::collections::HashSet;
@@ -16,6 +17,7 @@ use std::io::{self, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use tokio::runtime::Runtime;
 
 /// Scan result containing detections and metadata
 struct ScanResult {
@@ -149,6 +151,8 @@ fn run_watch_mode(
     quiet: bool,
     verbose: bool,
     running: Arc<AtomicBool>,
+    webhook: Option<&WebhookNotifier>,
+    rt: &Runtime,
 ) -> Result<()> {
     let mut seen_detections: HashSet<(u32, String)> = HashSet::new();
     let mut scan_count = 0u64;
@@ -204,7 +208,7 @@ fn run_watch_mode(
                     }
                 }
 
-                // Print details for new detections
+                // Print details for new detections and send webhooks
                 for detection in &new_detections {
                     let level = match detection.threat_level {
                         ThreatLevel::Malicious => "\x1b[31mMALICIOUS\x1b[0m",
@@ -226,6 +230,17 @@ fn run_watch_mode(
                         }
                         if detection.indicators.len() > 3 {
                             println!("    ... and {} more", detection.indicators.len() - 3);
+                        }
+                    }
+
+                    // Send webhook notification for new detections
+                    if let Some(notifier) = webhook {
+                        let hostname = hostname::get()
+                            .map(|h| h.to_string_lossy().to_string())
+                            .unwrap_or_else(|_| "unknown".to_string());
+
+                        if let Err(e) = rt.block_on(notifier.send_detection(detection, &hostname)) {
+                            debug!("Failed to send webhook: {}", e);
                         }
                     }
                 }
@@ -394,6 +409,19 @@ fn build_cli() -> Command {
                 .value_hint(ValueHint::FilePath)
                 .help("Compare against baseline file"),
         )
+        .arg(
+            Arg::new("webhook")
+                .long("webhook")
+                .value_name("URL")
+                .help("Send alerts to webhook URL (Slack/Discord/HTTP)"),
+        )
+        .arg(
+            Arg::new("webhook-type")
+                .long("webhook-type")
+                .value_name("TYPE")
+                .help("Webhook type (auto-detected if not specified)")
+                .value_parser(["slack", "discord", "generic"]),
+        )
 }
 
 fn main() -> Result<()> {
@@ -436,6 +464,8 @@ fn main() -> Result<()> {
     let min_threat_level = matches.get_one::<String>("min-threat-level").cloned();
     let save_baseline = matches.get_one::<String>("save-baseline").cloned();
     let baseline_file = matches.get_one::<String>("baseline").cloned();
+    let webhook_url = matches.get_one::<String>("webhook").cloned();
+    let webhook_type_str = matches.get_one::<String>("webhook-type").cloned();
 
     // Set up logging
     let log_level = if debug_mode {
@@ -516,6 +546,39 @@ fn main() -> Result<()> {
 
     let formatter = OutputFormatter::new(output_config);
 
+    // Set up webhook notifier if configured
+    let webhook_notifier = webhook_url.map(|url| {
+        let webhook_type = match webhook_type_str.as_deref() {
+            Some("slack") => WebhookType::Slack,
+            Some("discord") => WebhookType::Discord,
+            Some("generic") => WebhookType::Generic,
+            _ => {
+                // Auto-detect from URL
+                if url.contains("hooks.slack.com") {
+                    WebhookType::Slack
+                } else if url.contains("discord.com/api/webhooks") {
+                    WebhookType::Discord
+                } else {
+                    WebhookType::Generic
+                }
+            }
+        };
+
+        if !quiet {
+            println!(
+                "Webhook notifications enabled ({:?} -> {}...)\n",
+                webhook_type,
+                &url[..url.len().min(50)]
+            );
+        }
+
+        let config = WebhookConfig::new(url, webhook_type);
+        WebhookNotifier::new(config)
+    });
+
+    // Create tokio runtime for async webhook calls
+    let rt = Runtime::new().expect("Failed to create tokio runtime");
+
     // Watch mode or single scan
     if watch_mode {
         // Set up Ctrl+C handler
@@ -534,6 +597,8 @@ fn main() -> Result<()> {
             quiet,
             verbose,
             running,
+            webhook_notifier.as_ref(),
+            &rt,
         )?;
 
         Ok(())
@@ -553,6 +618,19 @@ fn main() -> Result<()> {
             result.detections.len(),
             result.duration.as_millis()
         );
+
+        // Send webhook notifications for detections
+        if let Some(ref notifier) = webhook_notifier {
+            let hostname = hostname::get()
+                .map(|h| h.to_string_lossy().to_string())
+                .unwrap_or_else(|_| "unknown".to_string());
+
+            for detection in &result.detections {
+                if let Err(e) = rt.block_on(notifier.send_detection(detection, &hostname)) {
+                    debug!("Failed to send webhook: {}", e);
+                }
+            }
+        }
 
         // Save baseline if requested
         if let Some(ref path) = save_baseline {
