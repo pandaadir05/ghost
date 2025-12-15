@@ -194,12 +194,12 @@ impl WebhookNotifier {
     }
 
     fn meets_threshold(&self, level: &ThreatLevel) -> bool {
-        match (&self.config.min_level, level) {
-            (ThreatLevel::Clean, _) => true,
-            (ThreatLevel::Suspicious, ThreatLevel::Suspicious | ThreatLevel::Malicious) => true,
-            (ThreatLevel::Malicious, ThreatLevel::Malicious) => true,
-            _ => false,
-        }
+        matches!(
+            (&self.config.min_level, level),
+            (ThreatLevel::Clean, _)
+                | (ThreatLevel::Suspicious, ThreatLevel::Suspicious | ThreatLevel::Malicious)
+                | (ThreatLevel::Malicious, ThreatLevel::Malicious)
+        )
     }
 
     fn build_slack_payload(&self, detection: &DetectionResult, hostname: &str) -> String {

@@ -143,6 +143,7 @@ fn output_results(
 }
 
 /// Runs continuous monitoring mode
+#[allow(clippy::too_many_arguments)]
 fn run_watch_mode(
     engine: &mut DetectionEngine,
     target_pid: Option<u32>,

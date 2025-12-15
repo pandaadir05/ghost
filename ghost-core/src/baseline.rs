@@ -236,9 +236,10 @@ mod tests {
     fn test_baseline_creation() {
         let processes = vec![ProcessInfo {
             pid: 1234,
+            ppid: 1,
             name: "test.exe".to_string(),
             path: Some("/usr/bin/test".to_string()),
-            parent_pid: Some(1),
+            thread_count: 1,
         }];
 
         let baseline = Baseline::from_detections(&[], &processes);
@@ -259,9 +260,10 @@ mod tests {
         let detection = DetectionResult {
             process: ProcessInfo {
                 pid: 1234,
+                ppid: 0,
                 name: "malware.exe".to_string(),
                 path: None,
-                parent_pid: None,
+                thread_count: 1,
             },
             threat_level: ThreatLevel::Malicious,
             confidence: 0.9,
