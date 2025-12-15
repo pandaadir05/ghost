@@ -1,5 +1,8 @@
 # Ghost
 
+[![CI](https://github.com/pandaadir05/ghost/actions/workflows/ci.yml/badge.svg)](https://github.com/pandaadir05/ghost/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 Ghost is a process injection detection tool written in Rust. It watches running processes and tries to catch suspicious stuff like code injection, memory manipulation, and other tricks that malware uses to hide.
 
 ## What it does

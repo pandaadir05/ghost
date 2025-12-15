@@ -8,6 +8,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Output size control with `--summary`, `--max-indicators`, `--min-threat-level` flags
+- OutputFormatter module for result formatting and deduplication
+- Indicator deduplication to reduce redundant output
+- Summary mode for aggregated scan statistics
+- Output configuration section in config file
+
+### Fixed
+- TUI not displaying on Windows (blank screen issue)
+- Terminal not restoring properly on crash/panic
+- Initial scan blocking TUI from rendering
+- Replaced println! with log macros for proper verbosity control
+
+### Changed
+- Default max indicators per detection is now 10 (was unlimited)
+- TUI now draws immediately before background scanning starts
+- Scan errors no longer prevent TUI from starting
+
+## [0.1.1] - 2024-12-06
+
+### Added
 - ebpf-detection feature flag for optional eBPF support (stub implementation)
 - TODO markers throughout codebase for stub implementations
 - Comprehensive documentation of limitations and unimplemented features
@@ -31,7 +51,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Clarified performance metrics are targets, not validated benchmarks
 - Updated technical documentation for implementation accuracy
 - macOS memory reading and thread enumeration now properly documented as implemented
-- macOS hook detection now fully implemented and documented with DYLD_INSERT_LIBRARIES and complete inline hook detection
+- macOS hook detection now fully implemented and documented
 
 ## [0.1.0] - 2024-11-20
 
@@ -60,8 +80,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - ML features are simulated without trained models
 - eBPF support is stub implementation only
 - Threat intelligence has no active feed connections
-- macOS has limited functionality (no hook detection)
 - Performance claims not validated with benchmarks
 
-[Unreleased]: https://github.com/pandaadir05/ghost/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/pandaadir05/ghost/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/pandaadir05/ghost/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/pandaadir05/ghost/releases/tag/v0.1.0
