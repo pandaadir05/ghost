@@ -83,7 +83,7 @@ impl Baseline {
                 ProcessSnapshot {
                     name: det.process.name.clone(),
                     path: det.process.path.clone(),
-                    threat_level: det.threat_level.clone(),
+                    threat_level: det.threat_level,
                     confidence: det.confidence,
                     indicators: det.indicators.clone(),
                 },
@@ -93,18 +93,13 @@ impl Baseline {
         // Add clean processes
         for proc in all_processes {
             let key = format!("{}:{}", proc.name, proc.pid);
-            if !processes.contains_key(&key) {
-                processes.insert(
-                    key,
-                    ProcessSnapshot {
-                        name: proc.name.clone(),
-                        path: proc.path.clone(),
-                        threat_level: ThreatLevel::Clean,
-                        confidence: 0.0,
-                        indicators: vec![],
-                    },
-                );
-            }
+            processes.entry(key).or_insert_with(|| ProcessSnapshot {
+                name: proc.name.clone(),
+                path: proc.path.clone(),
+                threat_level: ThreatLevel::Clean,
+                confidence: 0.0,
+                indicators: vec![],
+            });
         }
 
         let hostname = hostname::get()
@@ -130,12 +125,15 @@ impl Baseline {
     /// Loads baseline from a JSON file.
     pub fn load<P: AsRef<Path>>(path: P) -> io::Result<Self> {
         let json = fs::read_to_string(path)?;
-        serde_json::from_str(&json)
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+        serde_json::from_str(&json).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
     }
 
     /// Compares current detections against this baseline.
-    pub fn compare(&self, current: &[DetectionResult], all_processes: &[ProcessInfo]) -> BaselineDiff {
+    pub fn compare(
+        &self,
+        current: &[DetectionResult],
+        all_processes: &[ProcessInfo],
+    ) -> BaselineDiff {
         let mut new_processes = Vec::new();
         let mut escalated = Vec::new();
         let mut new_indicators = Vec::new();
@@ -143,26 +141,32 @@ impl Baseline {
         // Check each current detection
         for det in current {
             let key = format!("{}:{}", det.process.name, det.process.pid);
-            
+
             // Also check by name only (PID may change between reboots)
-            let by_name = self.processes.iter()
+            let by_name = self
+                .processes
+                .iter()
                 .find(|(_, snap)| snap.name == det.process.name);
 
             match (self.processes.get(&key), by_name) {
                 (Some(baseline), _) | (None, Some((_, baseline))) => {
                     // Check for escalation
-                    if threat_level_value(&det.threat_level) > threat_level_value(&baseline.threat_level) {
+                    if threat_level_value(&det.threat_level)
+                        > threat_level_value(&baseline.threat_level)
+                    {
                         escalated.push(EscalatedThreat {
                             process: det.process.clone(),
-                            baseline_level: baseline.threat_level.clone(),
-                            current_level: det.threat_level.clone(),
+                            baseline_level: baseline.threat_level,
+                            current_level: det.threat_level,
                             baseline_confidence: baseline.confidence,
                             current_confidence: det.confidence,
                         });
                     }
 
                     // Check for new indicators
-                    let new_inds: Vec<_> = det.indicators.iter()
+                    let new_inds: Vec<_> = det
+                        .indicators
+                        .iter()
                         .filter(|i| !baseline.indicators.contains(i))
                         .cloned()
                         .collect();
@@ -182,11 +186,12 @@ impl Baseline {
         }
 
         // Check for disappeared processes (informational)
-        let current_names: std::collections::HashSet<_> = all_processes.iter()
-            .map(|p| p.name.as_str())
-            .collect();
+        let current_names: std::collections::HashSet<_> =
+            all_processes.iter().map(|p| p.name.as_str()).collect();
 
-        let disappeared: Vec<_> = self.processes.values()
+        let disappeared: Vec<_> = self
+            .processes
+            .values()
             .filter(|snap| snap.threat_level != ThreatLevel::Clean)
             .filter(|snap| !current_names.contains(snap.name.as_str()))
             .map(|snap| snap.name.clone())
@@ -204,8 +209,8 @@ impl Baseline {
 impl BaselineDiff {
     /// Returns true if there are any changes from baseline.
     pub fn has_changes(&self) -> bool {
-        !self.new_processes.is_empty() 
-            || !self.escalated.is_empty() 
+        !self.new_processes.is_empty()
+            || !self.escalated.is_empty()
             || !self.new_indicators.is_empty()
     }
 
@@ -229,14 +234,12 @@ mod tests {
 
     #[test]
     fn test_baseline_creation() {
-        let processes = vec![
-            ProcessInfo {
-                pid: 1234,
-                name: "test.exe".to_string(),
-                path: Some("/usr/bin/test".to_string()),
-                parent_pid: Some(1),
-            },
-        ];
+        let processes = vec![ProcessInfo {
+            pid: 1234,
+            name: "test.exe".to_string(),
+            path: Some("/usr/bin/test".to_string()),
+            parent_pid: Some(1),
+        }];
 
         let baseline = Baseline::from_detections(&[], &processes);
         assert_eq!(baseline.process_count, 1);

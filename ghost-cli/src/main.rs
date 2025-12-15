@@ -16,6 +16,15 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+/// Scan result containing detections and metadata
+struct ScanResult {
+    detections: Vec<DetectionResult>,
+    processes: Vec<process::ProcessInfo>,
+    scanned_count: usize,
+    error_count: usize,
+    duration: Duration,
+}
+
 /// Runs a single scan and returns results
 fn run_scan(
     engine: &mut DetectionEngine,
@@ -23,10 +32,10 @@ fn run_scan(
     target_process: Option<&str>,
     quiet: bool,
     verbose: bool,
-) -> Result<(Vec<DetectionResult>, usize, usize, Duration)> {
+) -> Result<ScanResult> {
     let scan_start = Instant::now();
 
-    let processes = if let Some(pid) = target_pid {
+    let processes: Vec<process::ProcessInfo> = if let Some(pid) = target_pid {
         info!("Targeting specific process ID: {}", pid);
         let all_processes = process::enumerate_processes()?;
         all_processes.into_iter().filter(|p| p.pid == pid).collect()
@@ -76,7 +85,13 @@ fn run_scan(
     }
 
     let duration = scan_start.elapsed();
-    Ok((detections, scanned_count, error_count, duration))
+    Ok(ScanResult {
+        detections,
+        processes,
+        scanned_count,
+        error_count,
+        duration,
+    })
 }
 
 /// Formats and outputs scan results
@@ -152,9 +167,10 @@ fn run_watch_mode(
         }
 
         match run_scan(engine, target_pid, target_process, true, verbose) {
-            Ok((detections, scanned, errors, duration)) => {
+            Ok(result) => {
                 // Filter to only new detections we haven't seen
-                let new_detections: Vec<_> = detections
+                let new_detections: Vec<_> = result
+                    .detections
                     .iter()
                     .filter(|d| {
                         let key = (d.process.pid, d.process.name.clone());
@@ -163,22 +179,26 @@ fn run_watch_mode(
                     .collect();
 
                 if !quiet {
-                    if new_detections.is_empty() && detections.is_empty() {
-                        println!("clean ({} processes, {}ms)", scanned, duration.as_millis());
+                    if new_detections.is_empty() && result.detections.is_empty() {
+                        println!(
+                            "clean ({} processes, {}ms)",
+                            result.scanned_count,
+                            result.duration.as_millis()
+                        );
                     } else if new_detections.is_empty() {
                         println!(
                             "{} known threats ({} processes, {}ms)",
-                            detections.len(),
-                            scanned,
-                            duration.as_millis()
+                            result.detections.len(),
+                            result.scanned_count,
+                            result.duration.as_millis()
                         );
                     } else {
                         println!(
                             "{} NEW detections! ({} total, {} processes, {}ms)",
                             new_detections.len(),
-                            detections.len(),
-                            scanned,
-                            duration.as_millis()
+                            result.detections.len(),
+                            result.scanned_count,
+                            result.duration.as_millis()
                         );
                     }
                 }
@@ -209,8 +229,8 @@ fn run_watch_mode(
                     }
                 }
 
-                if errors > 0 && verbose {
-                    debug!("{} processes couldn't be scanned", errors);
+                if result.error_count > 0 && verbose {
+                    debug!("{} processes couldn't be scanned", result.error_count);
                 }
             }
             Err(e) => {
@@ -484,7 +504,7 @@ fn main() -> Result<()> {
         Ok(())
     } else {
         // Single scan
-        let (detections, scanned, errors, duration) = run_scan(
+        let result = run_scan(
             &mut engine,
             target_pid,
             target_process.as_deref(),
@@ -494,25 +514,99 @@ fn main() -> Result<()> {
 
         info!(
             "Scan complete: {} processes, {} detections, {}ms",
-            scanned,
-            detections.len(),
-            duration.as_millis()
+            result.scanned_count,
+            result.detections.len(),
+            result.duration.as_millis()
         );
 
-        output_results(
-            &detections,
-            scanned,
-            duration,
-            &formatter,
-            format,
-            output_file,
-            quiet,
-        )?;
+        // Save baseline if requested
+        if let Some(ref path) = save_baseline {
+            let baseline = Baseline::from_detections(&result.detections, &result.processes);
+            baseline.save(path)?;
+            if !quiet {
+                println!("Baseline saved to {}", path);
+                println!(
+                    "  {} processes, {} detections recorded",
+                    result.processes.len(),
+                    result.detections.len()
+                );
+            }
+        }
+
+        // Compare against baseline if provided
+        if let Some(ref path) = baseline_file {
+            let baseline = Baseline::load(path)?;
+            let diff = baseline.compare(&result.detections, &result.processes);
+
+            if diff.has_changes() {
+                println!(
+                    "\n\x1b[31m{} changes from baseline:\x1b[0m",
+                    diff.total_changes()
+                );
+
+                if !diff.new_processes.is_empty() {
+                    println!("\n  New threats ({}):", diff.new_processes.len());
+                    for det in &diff.new_processes {
+                        println!(
+                            "    {} (PID: {}) - {:?}",
+                            det.process.name, det.process.pid, det.threat_level
+                        );
+                    }
+                }
+
+                if !diff.escalated.is_empty() {
+                    println!("\n  Escalated threats ({}):", diff.escalated.len());
+                    for esc in &diff.escalated {
+                        println!(
+                            "    {} (PID: {}): {:?} -> {:?}",
+                            esc.process.name,
+                            esc.process.pid,
+                            esc.baseline_level,
+                            esc.current_level
+                        );
+                    }
+                }
+
+                if !diff.new_indicators.is_empty() {
+                    println!("\n  New indicators ({}):", diff.new_indicators.len());
+                    for ni in &diff.new_indicators {
+                        println!("    {} (PID: {}):", ni.process.name, ni.process.pid);
+                        for ind in ni.new_indicators.iter().take(3) {
+                            println!("      - {}", ind);
+                        }
+                    }
+                }
+            } else if !quiet {
+                println!("\x1b[32mNo changes from baseline\x1b[0m");
+            }
+        }
+
+        // Normal output (skip if baseline comparison was the main purpose)
+        if baseline_file.is_none() || save_baseline.is_some() {
+            output_results(
+                &result.detections,
+                result.scanned_count,
+                result.duration,
+                &formatter,
+                format,
+                output_file,
+                quiet,
+            )?;
+        }
 
         // Exit code
-        let code = if errors > 0 {
+        let code = if result.error_count > 0 {
             2
-        } else if !detections.is_empty() {
+        } else if baseline_file.is_some() {
+            // When comparing baseline, exit 1 if changes detected
+            let baseline = Baseline::load(baseline_file.as_ref().unwrap())?;
+            let diff = baseline.compare(&result.detections, &result.processes);
+            if diff.has_changes() {
+                1
+            } else {
+                0
+            }
+        } else if !result.detections.is_empty() {
             1
         } else {
             0
