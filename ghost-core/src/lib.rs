@@ -50,6 +50,7 @@
 //! - [`threat_intel`]: Threat intelligence correlation.
 
 pub mod anomaly;
+pub mod baseline;
 pub mod behavioral_ml;
 pub mod config;
 pub mod detection;
@@ -76,6 +77,7 @@ pub mod threat_intel;
 pub mod yara_engine;
 
 pub use anomaly::{AnomalyDetector, AnomalyScore, ProcessFeatures};
+pub use baseline::{Baseline, BaselineDiff, EscalatedThreat, NewIndicators, ProcessSnapshot};
 pub use behavioral_ml::{
     AdvancedBehavioralML, BehavioralAnalysisResult, BehavioralAnomaly, ModelConsensus,
     PredictedTechnique, RiskLevel, TemporalAnalysis,
