@@ -23,7 +23,7 @@ uuid = { version = "1.0", features = ["v4"] }
 toml = "0.8"
 chrono = { version = "0.4", features = ["serde"] }
 hostname = "0.4"
-yara = { version = "0.28", optional = true }
+yara = { version = "0.28", optional = true, features = ["vendored", "bundled-4_5_1"] }
 sha2 = "0.10"
 reqwest = { version = "0.11", features = ["json"] }
 pyo3 = { version = "0.24.1", optional = true, features = ["auto-initialize"] }
