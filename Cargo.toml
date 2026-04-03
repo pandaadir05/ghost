@@ -1,6 +1,7 @@
 [workspace]
 members = [ "ghost-cli",
     "ghost-core", "ghost-tui", "benches",
+    "ghost-gui",
 ]
 resolver = "2"
 

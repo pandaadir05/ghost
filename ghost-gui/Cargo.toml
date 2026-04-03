@@ -1,0 +1,21 @@
+[package]
+name = "ghost-gui"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Native GUI for Ghost process injection detection"
+
+[features]
+default = []
+yara-scanning = ["ghost-core/yara-scanning"]
+
+[dependencies]
+ghost-core = { path = "../ghost-core" }
+anyhow.workspace = true
+log.workspace = true
+env_logger.workspace = true
+
+# Native window UI
+# Keep in sync with MSRV in the repo (Rust >= 1.70)
+eframe = { version = "0.27", default-features = true }
