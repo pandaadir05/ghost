@@ -15,9 +15,6 @@ rule Process_Hollowing_Indicators
         $api_5 = "SetThreadContext" nocase
         $api_6 = "ResumeThread" nocase
 
-        // Suspended process creation
-        $create_suspended = { 6A 04 5? 6A 00 }
-
     condition:
         ($api_1 or $api_2) and 2 of ($api_3, $api_4, $api_5, $api_6)
 }
@@ -91,7 +88,6 @@ rule Thread_Execution_Hijacking
         $api_2 = "GetThreadContext" nocase
         $api_3 = "SetThreadContext" nocase
         $api_4 = "ResumeThread" nocase
-        $api_5 = "VirtualAllocEx" nocase
 
     condition:
         $api_1 and $api_2 and $api_3 and $api_4
@@ -146,8 +142,6 @@ rule PROPagate_Injection
     strings:
         $api_1 = "SetPropA" nocase
         $api_2 = "SetPropW" nocase
-        $api_3 = "EnumPropsA" nocase
-        $api_4 = "EnumPropsW" nocase
         $api_5 = "CallWindowProcA" nocase
         $api_6 = "CallWindowProcW" nocase
 
@@ -168,7 +162,6 @@ rule Early_Bird_Injection
         $api_2 = "CreateProcessW" nocase
         $api_3 = "QueueUserAPC" nocase
         $api_4 = "ResumeThread" nocase
-        $create_suspended = { 00 00 00 04 }
 
     condition:
         ($api_1 or $api_2) and $api_3 and $api_4
