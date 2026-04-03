@@ -81,7 +81,10 @@ impl AnomalyDetector {
 
         let rwx_regions = memory_regions
             .iter()
-            .filter(|r| r.protection == crate::MemoryProtection::ReadWriteExecute)
+            .filter(|r| {
+                r.region_type == "PRIVATE"
+                    && r.protection == crate::MemoryProtection::ReadWriteExecute
+            })
             .count();
 
         let private_regions = memory_regions

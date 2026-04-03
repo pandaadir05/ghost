@@ -174,33 +174,19 @@ impl DetectionEngine {
         let mut indicators = Vec::new();
         let mut confidence = 0.0;
 
-        // Check for RWX memory regions
-        let rwx_count = memory_regions
+        // Check for RWX memory regions (focus on PRIVATE regions; IMAGE pages can be legitimately executable)
+        let private_rwx_count = memory_regions
             .iter()
-            .filter(|r| r.protection == MemoryProtection::ReadWriteExecute)
+            .filter(|r| r.region_type == "PRIVATE" && r.protection == MemoryProtection::ReadWriteExecute)
             .count();
 
-        if rwx_count > 0 {
-            indicators.push(format!("{} RWX memory regions detected", rwx_count));
-            confidence += 0.3;
-        }
-
-        // Check for private executable memory
-        let private_exec = memory_regions
-            .iter()
-            .filter(|r| {
-                r.region_type == "PRIVATE"
-                    && (r.protection == MemoryProtection::ReadWriteExecute
-                        || r.protection == MemoryProtection::ReadExecute)
-            })
-            .count();
-
-        if private_exec > 2 {
+        if private_rwx_count > 0 {
+            // RWX can occur in benign software (e.g., JITs); treat as a weak standalone signal.
             indicators.push(format!(
-                "{} private executable regions (possible shellcode)",
-                private_exec
+                "{} PRIVATE RWX memory regions detected",
+                private_rwx_count
             ));
-            confidence += 0.4;
+            // No confidence boost without corroborating execution evidence.
         }
 
         // Check for thread count anomalies
@@ -212,9 +198,9 @@ impl DetectionEngine {
             }
 
             // Detect significant RWX increase (possible injection)
-            if rwx_count > baseline.rwx_regions + 1 {
+            if private_rwx_count > baseline.rwx_regions + 1 {
                 indicators.push("Rapid RWX region allocation".to_string());
-                confidence += 0.5;
+                confidence += 0.2;
             }
         }
 
@@ -223,7 +209,7 @@ impl DetectionEngine {
 
         // Analyze threads if provided
         if let Some(thread_list) = threads {
-            self.analyze_threads(thread_list, &mut indicators, &mut confidence);
+            self.analyze_threads(thread_list, memory_regions, &mut indicators, &mut confidence);
         }
 
         // Check for Windows hook injection
@@ -242,8 +228,10 @@ impl DetectionEngine {
             }
         }
 
-        // Scan for shellcode patterns in executable memory regions
-        let shellcode_detections = self.scan_for_shellcode(process.pid, memory_regions);
+        // Scan for shellcode patterns in executable memory regions.
+        // To reduce false positives in JIT-heavy applications, focus on regions that contain
+        // a thread's start address (a stronger signal of injected execution).
+        let shellcode_detections = self.scan_for_shellcode(process.pid, memory_regions, threads);
         if !shellcode_detections.is_empty() {
             for detection in &shellcode_detections {
                 indicators.push(format!(
@@ -298,22 +286,38 @@ impl DetectionEngine {
                         yara_result.scan_time_ms
                     );
 
-                    for yara_match in &yara_result.matches {
+                    // De-duplicate by rule name and cap contribution to prevent runaway confidence.
+                    let mut per_rule: HashMap<String, (crate::yara_engine::ThreatLevel, usize)> =
+                        HashMap::new();
+                    for m in &yara_result.matches {
+                        let entry = per_rule
+                            .entry(m.rule_name.clone())
+                            .or_insert((m.threat_level, 0));
+                        entry.1 += 1;
+                        if (m.threat_level as u8) > (entry.0 as u8) {
+                            entry.0 = m.threat_level;
+                        }
+                    }
+
+                    let mut yara_confidence = 0.0f32;
+                    for (rule_name, (threat_level, hit_count)) in per_rule {
                         indicators.push(format!(
-                            "YARA: {} matched at {:#x} (threat level: {:?})",
-                            yara_match.rule_name, yara_match.offset, yara_match.threat_level
+                            "YARA: {} matched ({} hit(s), threat level: {:?})",
+                            rule_name, hit_count, threat_level
                         ));
 
-                        // Adjust confidence based on threat level
-                        let threat_boost = match yara_match.threat_level {
-                            crate::yara_engine::ThreatLevel::Critical => 0.8,
-                            crate::yara_engine::ThreatLevel::High => 0.6,
-                            crate::yara_engine::ThreatLevel::Medium => 0.4,
-                            crate::yara_engine::ThreatLevel::Low => 0.2,
-                            crate::yara_engine::ThreatLevel::Info => 0.1,
+                        let threat_boost = match threat_level {
+                            crate::yara_engine::ThreatLevel::Critical => 0.5,
+                            crate::yara_engine::ThreatLevel::High => 0.4,
+                            crate::yara_engine::ThreatLevel::Medium => 0.25,
+                            crate::yara_engine::ThreatLevel::Low => 0.15,
+                            crate::yara_engine::ThreatLevel::Info => 0.05,
                         };
-                        confidence += threat_boost;
+
+                        yara_confidence += threat_boost;
                     }
+
+                    confidence += yara_confidence.min(0.6);
                 }
             }
         }
@@ -367,7 +371,7 @@ impl DetectionEngine {
             process.pid,
             ProcessBaseline {
                 thread_count: process.thread_count,
-                rwx_regions: rwx_count,
+                rwx_regions: private_rwx_count,
             },
         );
 
@@ -514,35 +518,23 @@ impl DetectionEngine {
         &self,
         regions: &[MemoryRegion],
         indicators: &mut Vec<String>,
-        confidence: &mut f32,
+        _confidence: &mut f32,
     ) {
         // Look for small executable allocations (typical shellcode size)
         let small_exec = regions
             .iter()
             .filter(|r| {
+                r.region_type == "PRIVATE"
+                    && r.protection == MemoryProtection::ReadWriteExecute
+                    &&
                 r.size < 0x10000 // 64KB
-                    && (r.protection == MemoryProtection::ReadExecute
-                        || r.protection == MemoryProtection::ReadWriteExecute)
             })
             .count();
 
         if small_exec >= 3 {
             indicators.push("Multiple small executable allocations".to_string());
-            *confidence += 0.3;
-        }
-
-        // Check for memory gaps that might indicate hollowing
-        let mut sorted_regions: Vec<_> = regions.iter().collect();
-        sorted_regions.sort_by_key(|r| r.base_address);
-
-        for window in sorted_regions.windows(2) {
-            let gap = window[1].base_address - (window[0].base_address + window[0].size);
-            if gap > 0x100000 && gap < 0x1000000 {
-                // 1MB to 16MB gap is suspicious
-                indicators.push("Suspicious memory gaps detected".to_string());
-                *confidence += 0.2;
-                break;
-            }
+            // Do not increase confidence by itself; JIT workloads commonly allocate many small
+            // executable pages. Treat as supporting evidence only.
         }
     }
 
@@ -550,32 +542,65 @@ impl DetectionEngine {
     fn analyze_threads(
         &self,
         threads: &[ThreadInfo],
+        regions: &[MemoryRegion],
         indicators: &mut Vec<String>,
         confidence: &mut f32,
     ) {
-        // Check for threads started from unusual locations
-        let suspicious_threads = threads
-            .iter()
-            .filter(|t| {
-                // Look for threads not started from main image
-                t.start_address != 0 && (t.start_address & 0xFFFF_0000) != 0x7FF0_0000
-            })
-            .count();
+        // Flag threads that start executing from suspicious locations.
+        // On modern OSes, module base addresses vary (ASLR), so fixed-range heuristics cause massive false positives.
+        let mut private_exec_starts = 0usize;
+        let mut unmapped_starts = 0usize;
+        let mut private_non_exec_starts = 0usize;
 
-        if suspicious_threads > 0 {
-            indicators.push(format!(
-                "{} threads with suspicious start addresses",
-                suspicious_threads
-            ));
-            *confidence += 0.4;
+        for t in threads {
+            if t.start_address == 0 {
+                continue;
+            }
+
+            let region = regions.iter().find(|r| {
+                t.start_address >= r.base_address && t.start_address < r.base_address + r.size
+            });
+
+            match region {
+                None => {
+                    unmapped_starts += 1;
+                }
+                // Only treat non-executable *PRIVATE* starts as suspicious.
+                // IMAGE-backed non-exec pages can appear due to guard/metadata regions and should not be flagged.
+                Some(r) if r.region_type == "PRIVATE" && !r.protection.is_executable() => {
+                    private_non_exec_starts += 1;
+                }
+                Some(r) if r.region_type == "PRIVATE" && r.protection.is_executable() => {
+                    private_exec_starts += 1;
+                }
+                Some(_) => {}
+            }
         }
 
-        // Check for abnormal thread creation time patterns
-        let recent_threads = threads.iter().filter(|t| t.creation_time > 0).count();
+        if private_exec_starts > 0 {
+            indicators.push(format!(
+                "{} thread(s) started in PRIVATE executable memory",
+                private_exec_starts
+            ));
+            *confidence += 0.6;
+        }
 
-        if recent_threads as f32 / threads.len() as f32 > 0.5 {
-            indicators.push("High ratio of recently created threads".to_string());
-            *confidence += 0.3;
+        if unmapped_starts > 0 {
+            indicators.push(format!(
+                "{} thread(s) started at unmapped addresses",
+                unmapped_starts
+            ));
+            // Can happen with limited visibility; treat as a supporting signal.
+            *confidence += 0.2;
+        }
+
+        if private_non_exec_starts > 0 {
+            indicators.push(format!(
+                "{} thread(s) started in non-executable PRIVATE memory",
+                private_non_exec_starts
+            ));
+            // One-off cases can be measurement artifacts; require stronger corroboration elsewhere.
+            *confidence += if private_non_exec_starts >= 2 { 0.25 } else { 0.1 };
         }
     }
 
@@ -584,6 +609,7 @@ impl DetectionEngine {
         &self,
         pid: u32,
         regions: &[MemoryRegion],
+        threads: Option<&[ThreadInfo]>,
     ) -> Vec<crate::ShellcodeDetection> {
         use crate::memory::read_process_memory;
 
@@ -597,6 +623,21 @@ impl DetectionEngine {
             ) && region.region_type == "PRIVATE"
                 && region.size < 0x100000
             {
+                // Strongly prefer regions that are plausibly used for injected execution.
+                // Many benign processes have private executable pages (e.g., JIT), but threads
+                // typically start in IMAGE-backed code.
+                let has_thread_start_in_region = threads.map_or(false, |thread_list| {
+                    thread_list.iter().any(|t| {
+                        t.start_address != 0
+                            && t.start_address >= region.base_address
+                            && t.start_address < region.base_address + region.size
+                    })
+                });
+
+                if !has_thread_start_in_region {
+                    continue;
+                }
+
                 // Read actual memory content from the process
                 if let Ok(memory_data) = read_process_memory(pid, region.base_address, region.size)
                 {
