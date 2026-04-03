@@ -5,6 +5,10 @@ edition.workspace = true
 authors.workspace = true
 license.workspace = true
 
+[features]
+default = []
+yara-scanning = ["ghost-core/yara-scanning"]
+
 [dependencies]
 ghost-core = { path = "../ghost-core" }
 anyhow.workspace = true
