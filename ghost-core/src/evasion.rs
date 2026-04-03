@@ -677,64 +677,20 @@ impl EvasionDetector {
         memory_regions: &[MemoryRegion],
         threads: &[ThreadInfo],
     ) -> EvasionResult {
-        let mut evasion_techniques = Vec::new();
-        let mut confidence = 0.0f32;
-        let mut sophistication_score = 0.0f32;
-        let mut anti_analysis_indicators = Vec::new();
-
-        // Timing-based evasion analysis
-        let timing_result = self
-            .timing_analyzer
-            .analyze_timing_evasion(process, threads);
-        if !timing_result.techniques.is_empty() {
-            evasion_techniques.extend(timing_result.techniques);
-            confidence += timing_result.confidence * 0.3;
-            sophistication_score += timing_result.sophistication * 0.25;
-        }
-
-        // Environment checking analysis
-        let env_result = self.environment_checker.check_environment_evasion(process);
-        if !env_result.techniques.is_empty() {
-            evasion_techniques.extend(env_result.techniques);
-            confidence += env_result.confidence * 0.3;
-            sophistication_score += env_result.sophistication * 0.25;
-        }
-
-        // Behavioral analysis
-        let behavior_result =
-            self.behavior_analyzer
-                .analyze_behavior_evasion(process, memory_regions, threads);
-        if !behavior_result.techniques.is_empty() {
-            evasion_techniques.extend(behavior_result.techniques);
-            confidence += behavior_result.confidence * 0.25;
-            sophistication_score += behavior_result.sophistication * 0.3;
-        }
-
-        // Obfuscation analysis
-        let obfuscation_result = self
-            .obfuscation_detector
-            .detect_obfuscation(process, memory_regions);
-        if !obfuscation_result.techniques.is_empty() {
-            evasion_techniques.extend(obfuscation_result.techniques);
-            confidence += obfuscation_result.confidence * 0.15;
-            sophistication_score += obfuscation_result.sophistication * 0.2;
-        }
-
-        // Compile anti-analysis indicators
-        anti_analysis_indicators.extend(timing_result.indicators);
-        anti_analysis_indicators.extend(env_result.indicators);
-        anti_analysis_indicators.extend(behavior_result.indicators);
-        anti_analysis_indicators.extend(obfuscation_result.indicators);
-
-        // Normalize scores
-        confidence = confidence.min(1.0);
-        sophistication_score = sophistication_score.min(1.0);
+        // NOTE:
+        // The current evasion detectors in this module are largely placeholder / hardcoded
+        // (e.g., always returning "Sleep-based Evasion"). Running them in production causes
+        // widespread false positives on benign processes.
+        //
+        // Until this module is backed by real evidence (telemetry, API call traces, or verified
+        // heuristics), keep it conservative and report nothing.
+        let _ = (process, memory_regions, threads);
 
         EvasionResult {
-            evasion_techniques,
-            confidence,
-            sophistication_score,
-            anti_analysis_indicators,
+            evasion_techniques: Vec::new(),
+            confidence: 0.0,
+            sophistication_score: 0.0,
+            anti_analysis_indicators: Vec::new(),
         }
     }
 }
