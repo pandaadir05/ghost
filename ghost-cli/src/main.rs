@@ -13,11 +13,28 @@ use ghost_core::{
 };
 use log::{debug, error, info};
 use std::collections::HashSet;
-use std::io::{self, Write};
+use std::io::{self, IsTerminal, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::runtime::Runtime;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ProgressMode {
+    Auto,
+    Show,
+    Hide,
+}
+
+impl ProgressMode {
+    fn parse(s: &str) -> Self {
+        match s {
+            "show" => ProgressMode::Show,
+            "hide" => ProgressMode::Hide,
+            _ => ProgressMode::Auto,
+        }
+    }
+}
 
 /// Scan result containing detections and metadata
 struct ScanResult {
@@ -35,6 +52,8 @@ fn run_scan(
     target_process: Option<&str>,
     quiet: bool,
     verbose: bool,
+    progress_mode: ProgressMode,
+    progress_detail: bool,
 ) -> Result<ScanResult> {
     let scan_start = Instant::now();
 
@@ -53,21 +72,76 @@ fn run_scan(
         process::enumerate_processes()?
     };
 
+    let targets: Vec<&process::ProcessInfo> = processes
+        .iter()
+        .filter(|proc| {
+            // Skip known safe system processes
+            proc.name != "csrss.exe" && proc.name != "wininit.exe" && proc.name != "winlogon.exe"
+        })
+        .collect();
+
+    let show_progress = !quiet
+        && match progress_mode {
+            ProgressMode::Hide => false,
+            ProgressMode::Show => true,
+            ProgressMode::Auto => io::stderr().is_terminal(),
+        };
+    let total_targets = targets.len();
+    let progress_interval = Duration::from_millis(750);
+    let mut last_progress = Instant::now();
+
     if !quiet {
-        println!("Scanning {} processes...", processes.len());
+        println!("Scanning {} processes...", total_targets);
     }
 
     let mut detections = Vec::new();
     let mut scanned_count = 0;
     let mut error_count = 0;
 
-    for proc in &processes {
-        // Skip known safe system processes
-        if proc.name == "csrss.exe" || proc.name == "wininit.exe" || proc.name == "winlogon.exe" {
-            continue;
-        }
-
+    for proc in targets {
         scanned_count += 1;
+
+        if show_progress && (scanned_count == 1 || last_progress.elapsed() >= progress_interval) {
+            let elapsed = scan_start.elapsed();
+            let eta_secs = if total_targets > 0 && scanned_count >= 2 {
+                let elapsed_secs = elapsed.as_secs_f64();
+                if elapsed_secs > 0.0 {
+                    let rate = scanned_count as f64 / elapsed_secs;
+                    if rate > 0.0 {
+                        let remaining = total_targets.saturating_sub(scanned_count) as f64;
+                        Some((remaining / rate).round() as u64)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+
+            let line = if progress_detail {
+                let mut s = format!(
+                    "Scanning {} (PID {})  {}/{}",
+                    proc.name, proc.pid, scanned_count, total_targets
+                );
+                if let Some(eta) = eta_secs {
+                    s.push_str(&format!("  ETA: {}s", eta));
+                }
+                s
+            } else {
+                let mut s = format!("Progress: {}/{} processes scanned", scanned_count, total_targets);
+                if let Some(eta) = eta_secs {
+                    s.push_str(&format!("  ETA: {}s", eta));
+                }
+                s.push_str("...");
+                s
+            };
+
+            let _ = write!(io::stderr(), "\r{}\x1b[K", line);
+            let _ = io::stderr().flush();
+            last_progress = Instant::now();
+        }
 
         match memory::enumerate_memory_regions(proc.pid) {
             Ok(regions) => {
@@ -88,6 +162,18 @@ fn run_scan(
     }
 
     let duration = scan_start.elapsed();
+
+    if show_progress {
+        let _ = write!(
+            io::stderr(),
+            "\rProgress: {}/{} processes scanned... done ({:?})\x1b[K\n",
+            scanned_count,
+            total_targets,
+            duration
+        );
+        let _ = io::stderr().flush();
+    }
+
     Ok(ScanResult {
         detections,
         processes,
@@ -172,7 +258,15 @@ fn run_watch_mode(
             io::stdout().flush()?;
         }
 
-        match run_scan(engine, target_pid, target_process, true, verbose) {
+        match run_scan(
+            engine,
+            target_pid,
+            target_process,
+            true,
+            verbose,
+            ProgressMode::Hide,
+            false,
+        ) {
             Ok(result) => {
                 // Filter to only new detections we haven't seen
                 let new_detections: Vec<_> = result
@@ -309,6 +403,20 @@ fn build_cli() -> Command {
                 .long("verbose")
                 .help("Show more details")
                 .action(clap::ArgAction::SetTrue),
+        )
+        .arg(
+            Arg::new("progress")
+                .long("progress")
+                .value_name("MODE")
+                .default_value("auto")
+                .value_parser(["auto", "show", "hide"])
+                .help("Progress display: auto (TTY-only), show, or hide"),
+        )
+        .arg(
+            Arg::new("progress-detail")
+                .long("progress-detail")
+                .action(clap::ArgAction::SetTrue)
+                .help("Show current process (name/PID) and ETA in progress line"),
         )
         .arg(
             Arg::new("pid")
@@ -448,6 +556,13 @@ fn main() -> Result<()> {
     let debug_mode = matches.get_flag("debug");
     let quiet = matches.get_flag("quiet");
     let verbose = matches.get_flag("verbose");
+        let progress_mode = ProgressMode::parse(
+            matches
+                .get_one::<String>("progress")
+                .map(|s| s.as_str())
+                .unwrap_or("auto"),
+        );
+        let progress_detail = matches.get_flag("progress-detail");
     let watch_mode = matches.get_flag("watch");
     let summary_mode = matches.get_flag("summary");
     let mitre_stats = matches.get_flag("mitre-stats");
@@ -473,8 +588,11 @@ fn main() -> Result<()> {
         log::LevelFilter::Debug
     } else if quiet {
         log::LevelFilter::Error
-    } else {
+    } else if verbose {
         log::LevelFilter::Info
+    } else {
+        // Default to warn to avoid flooding stdout during large scans.
+        log::LevelFilter::Warn
     };
 
     env_logger::Builder::from_default_env()
@@ -611,6 +729,8 @@ fn main() -> Result<()> {
             target_process.as_deref(),
             quiet,
             verbose,
+            progress_mode,
+            progress_detail,
         )?;
 
         info!(
@@ -709,7 +829,9 @@ fn main() -> Result<()> {
         }
 
         // Exit code
-        let code = if result.error_count > 0 {
+        // Note: `error_count` is per-process scan failures (e.g., access denied on protected
+        // processes). That's expected on Windows and shouldn't make the whole scan "error".
+        let code = if result.scanned_count == 0 || result.error_count >= result.scanned_count {
             2
         } else if baseline_file.is_some() {
             // When comparing baseline, exit 1 if changes detected
