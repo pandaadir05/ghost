@@ -34,6 +34,26 @@ It also maps detected behaviors to the MITRE ATT&CK framework, which is helpful 
 
 ## Building it
 
+### Windows quickstart (PowerShell)
+
+Ghost needs elevated permissions to inspect most processes on Windows. For best results, open PowerShell **as Administrator**.
+
+```powershell
+git clone https://github.com/pandaadir05/ghost
+cd ghost
+
+# Install Rust (MSVC toolchain)
+winget install RustLang.RustUp
+
+# Build + run
+cargo build --release
+cargo run -p ghost-cli --release
+```
+
+If you see a lot of log lines during scanning, use `--quiet` (or `--summary`) to keep output minimal.
+
+Note: On Windows you also need Visual Studio C++ build tools ("Desktop development with C++") for some dependencies.
+
 You'll need Rust installed (1.70 or newer). Then:
 
 ```bash
@@ -50,22 +70,31 @@ There are two interfaces: a command-line tool and an interactive terminal UI.
 
 ```bash
 # Scan all processes
-cargo run --bin ghost-cli --release
+cargo run -p ghost-cli --release
 
 # Target one process
-cargo run --bin ghost-cli --release -- --pid 1234
+cargo run -p ghost-cli --release -- --pid 1234
 
 # Output results as JSON
-cargo run --bin ghost-cli --release -- --format json
+cargo run -p ghost-cli --release -- --format json
 
 # Use a config file
-cargo run --bin ghost-cli --release -- --config ghost.toml
+cargo run -p ghost-cli --release -- --config ghost.toml
 
 # Continuous monitoring mode
-cargo run --bin ghost-cli --release -- --watch
+cargo run -p ghost-cli --release -- --watch
 
 # Watch with custom interval (10 seconds)
-cargo run --bin ghost-cli --release -- --watch --interval 10
+cargo run -p ghost-cli --release -- --watch --interval 10
+
+# Show live progress even when not a TTY
+cargo run -p ghost-cli --release -- --progress show
+
+# Show which process is currently being scanned (+ ETA)
+cargo run -p ghost-cli --release -- --progress show --progress-detail
+
+# Hide progress output (scan still runs and prints results)
+cargo run -p ghost-cli --release -- --progress hide
 ```
 
 **TUI:**
@@ -76,15 +105,80 @@ cargo run --bin ghost-tui --release
 
 The TUI gives you a dashboard with live stats, detection history, and you can navigate around with keyboard shortcuts (Tab to switch views, Q to quit).
 
+**GUI (native window):**
+
+```bash
+cargo run -p ghost-gui --release
+```
+
+The GUI is a simple one-shot scanner with a progress bar and an easy results view.
+
+While scanning, you can click **Hide updates** to stop live UI updates (the scan keeps running in the background). Click **Show updates** to catch up instantly.
+
+On Windows, run as Administrator for full visibility.
+
+## YARA scanning (optional)
+
+By default, YARA scanning is **disabled** at build time. To enable it, build with the `yara-scanning` feature.
+
+When enabled, Ghost loads rules from the [rules/](rules/) directory and scans **PRIVATE executable memory** (to reduce false positives from IMAGE-backed code pages).
+
+### Enable the feature
+
+```bash
+# CLI
+cargo run -p ghost-cli --release --features yara-scanning
+
+# GUI
+cargo run -p ghost-gui --release --features yara-scanning
+```
+
+### Windows dependencies (required)
+
+Ghost uses a vendored/bundled YARA build, so you don't need to install YARA separately.
+However, `yara-sys` still uses `bindgen`, which requires LLVM/Clang (`libclang.dll`).
+
+PowerShell example:
+
+```powershell
+# 1) Install LLVM (provides libclang.dll)
+winget install LLVM.LLVM
+
+# 2) Point bindgen at libclang.dll
+$env:LIBCLANG_PATH = "C:\Program Files\LLVM\bin"
+```
+
+If you still see “YARA scanning is disabled”, double-check that you’re passing `--features yara-scanning` to the `cargo run` command.
+
+## Testing
+
+Quick checks you can run before publishing:
+
+```bash
+# Core tests
+cargo test -p ghost-core
+
+# Safe YARA canary (proves YARA works without any harmful payloads)
+cargo test -p ghost-core --features yara-scanning yara_can_scan_a_simple_memory_buffer
+```
+
+Note: the CLI intentionally uses non-zero exit codes when it finds detections:
+
+- `0` = clean
+- `1` = suspicious/malicious detections found
+- `2` = scan failed (e.g., nothing could be scanned)
+
+When using `cargo run`, an exit code of `1` will show as “process didn't exit successfully” even though the scan ran correctly.
+
 ## Shell Completions
 
 Ghost supports tab completion for Bash, Zsh, Fish, PowerShell, and Elvish.
 
 ```bash
 # Generate completions for your shell
-ghost completions bash > /etc/bash_completion.d/ghost
-ghost completions zsh > ~/.zfunc/_ghost
-ghost completions fish > ~/.config/fish/completions/ghost.fish
+ghost-cli completions bash > /etc/bash_completion.d/ghost
+ghost-cli completions zsh > ~/.zfunc/_ghost
+ghost-cli completions fish > ~/.config/fish/completions/ghost.fish
 
 # Or use the install script
 ./completions/install.sh
@@ -97,7 +191,7 @@ See `completions/README.md` for detailed installation instructions.
 Ghost supports optional features that can be enabled during build:
 
 ```bash
-# YARA rule scanning (requires libyara)
+# YARA rule scanning (vendored/bundled YARA; requires LLVM/Clang for bindgen on some platforms)
 cargo build --features yara-scanning
 
 # Neural ML integration (requires Python and trained models)
