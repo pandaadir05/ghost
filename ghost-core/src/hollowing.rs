@@ -1,7 +1,6 @@
 use crate::{MemoryRegion, ProcessInfo, Result};
 
-#[cfg(windows)]
-use crate::memory::{validate_pe_header, PEHeaderValidation};
+// PE header validation intentionally disabled (see comments in analyze_process).
 
 #[derive(Debug, Clone)]
 pub struct HollowingDetection {
@@ -128,6 +127,17 @@ impl HollowingDetector {
         process: &ProcessInfo,
         memory_regions: &[MemoryRegion],
     ) -> Result<Option<HollowingDetection>> {
+        // PID 0/4 are kernel/system pseudo-processes where our user-mode memory
+        // enumeration intentionally returns empty; do not attempt hollowing heuristics.
+        if process.pid == 0 || process.pid == 4 {
+            return Ok(None);
+        }
+
+        // If we couldn't enumerate any memory, treat as "unknown" rather than "hollowed".
+        if memory_regions.is_empty() {
+            return Ok(None);
+        }
+
         let mut indicators = Vec::new();
         let mut confidence: f32 = 0.0;
 
@@ -137,42 +147,14 @@ impl HollowingDetector {
             confidence += 0.8;
         }
 
-        // Check memory layout anomalies
-        if let Some(indicator) = self.check_memory_layout_anomalies(memory_regions) {
-            indicators.push(indicator);
-            confidence += 0.6;
-        }
+        // Memory layout heuristics intentionally disabled (too noisy under ASLR/JIT workloads).
 
-        // Check for suspicious memory gaps
-        if let Some(indicator) = self.check_memory_gaps(memory_regions) {
-            indicators.push(indicator);
-            confidence += 0.4;
-        }
+        // PE header validation disabled: module base address cannot be inferred reliably from
+        // VirtualQueryEx regions alone (modules span multiple regions). Doing this naively causes
+        // false positives on benign processes.
 
-        // Check for PE header anomalies (heuristic-based)
-        if let Some(indicator) = self.check_pe_header_anomalies(memory_regions) {
-            indicators.push(indicator);
-            confidence += 0.7;
-        }
-
-        // Validate actual PE headers (deep inspection)
-        if let Some(indicator) = self.validate_pe_headers(process.pid, memory_regions) {
-            indicators.push(indicator);
-            confidence += 0.9; // Higher confidence for actual PE validation
-        }
-
-        // Check entry point location
-        if let Some(indicator) = self.check_entry_point_anomalies(process, memory_regions) {
-            indicators.push(indicator);
-            confidence += 0.5;
-        }
-
-        // Deep PE comparison with section hashing (Windows only)
-        if let Some(mut deep_indicators) = self.deep_pe_comparison(process) {
-            let indicator_count = deep_indicators.len() as f32;
-            confidence += 0.9 * (indicator_count / 3.0).min(1.0);
-            indicators.append(&mut deep_indicators);
-        }
+        // NOTE: Deep PE comparison was removed because the previous implementation assumed a
+        // fixed base address (0x400000) and produced widespread false positives under ASLR.
 
         if !indicators.is_empty() {
             Ok(Some(HollowingDetection {
@@ -202,373 +184,11 @@ impl HollowingDetector {
             return Some(HollowingIndicator::UnmappedMainImage);
         }
 
-        // Check if the main image base is suspicious
-        // Most Windows executables load at predictable addresses
-        for region in &main_image_regions {
-            if region.base_address < 0x400000 || region.base_address > 0x80000000 {
-                return Some(HollowingIndicator::SuspiciousImageBase);
-            }
-        }
-
         None
     }
 
-    fn check_memory_layout_anomalies(
-        &self,
-        regions: &[MemoryRegion],
-    ) -> Option<HollowingIndicator> {
-        // Calculate total executable memory size
-        let total_executable: usize = regions
-            .iter()
-            .filter(|r| {
-                matches!(
-                    r.protection,
-                    crate::MemoryProtection::ReadExecute
-                        | crate::MemoryProtection::ReadWriteExecute
-                )
-            })
-            .map(|r| r.size)
-            .sum();
+    // validate_pe_headers intentionally removed.
 
-        // Check for unusually large or small executable regions
-        if total_executable > 0x10000000 {
-            // More than 256MB of executable memory is very suspicious
-            return Some(HollowingIndicator::MemoryLayoutAnomaly {
-                expected_size: 0x1000000, // 16MB expected
-                actual_size: total_executable,
-            });
-        }
-
-        // Check for too many small executable regions (potential shellcode injection)
-        let small_exec_regions = regions
-            .iter()
-            .filter(|r| {
-                matches!(r.protection, crate::MemoryProtection::ReadExecute | crate::MemoryProtection::ReadWriteExecute)
-                    && r.size < 0x10000 // Less than 64KB
-                    && r.region_type == "PRIVATE"
-            })
-            .count();
-
-        if small_exec_regions > 10 {
-            return Some(HollowingIndicator::MemoryLayoutAnomaly {
-                expected_size: 3, // 3 or fewer small executable regions expected
-                actual_size: small_exec_regions,
-            });
-        }
-
-        None
-    }
-
-    fn check_memory_gaps(&self, regions: &[MemoryRegion]) -> Option<HollowingIndicator> {
-        // Sort regions by base address
-        let mut sorted_regions: Vec<_> = regions.iter().collect();
-        sorted_regions.sort_by_key(|r| r.base_address);
-
-        let mut gaps = Vec::new();
-
-        // Find gaps between consecutive regions
-        for window in sorted_regions.windows(2) {
-            let current_end = window[0].base_address + window[0].size;
-            let next_start = window[1].base_address;
-
-            if next_start > current_end {
-                let gap_size = next_start - current_end;
-                // Only consider significant gaps (> 64KB)
-                if gap_size > 0x10000 {
-                    gaps.push(gap_size);
-                }
-            }
-        }
-
-        // Look for suspicious gap patterns
-        let large_gaps = gaps.iter().filter(|&&gap| gap > 0x1000000).count(); // 16MB+
-        let total_gaps = gaps.len();
-
-        if large_gaps > 0 || total_gaps > 20 {
-            let largest_gap = gaps.iter().max().copied().unwrap_or(0);
-            return Some(HollowingIndicator::SuspiciousMemoryGaps {
-                gap_count: total_gaps,
-                largest_gap,
-            });
-        }
-
-        None
-    }
-
-    fn check_pe_header_anomalies(&self, regions: &[MemoryRegion]) -> Option<HollowingIndicator> {
-        // Look for IMAGE regions that might have mismatched PE headers
-        let image_regions: Vec<_> = regions
-            .iter()
-            .filter(|r| r.region_type == "IMAGE")
-            .collect();
-
-        // Check for unusual number of IMAGE regions
-        if image_regions.len() > 50 {
-            // Too many loaded modules might indicate DLL injection
-            return Some(HollowingIndicator::MismatchedPEHeader);
-        }
-
-        // Check for IMAGE regions at unusual addresses
-        for region in &image_regions {
-            // PE images should typically be aligned to 64KB boundaries
-            if region.base_address % 0x10000 != 0 {
-                return Some(HollowingIndicator::MismatchedPEHeader);
-            }
-        }
-
-        None
-    }
-
-    #[cfg(windows)]
-    fn validate_pe_headers(
-        &self,
-        pid: u32,
-        regions: &[MemoryRegion],
-    ) -> Option<HollowingIndicator> {
-        // Focus on main executable IMAGE regions
-        let image_regions: Vec<_> = regions
-            .iter()
-            .filter(|r| r.region_type == "IMAGE")
-            .take(5) // Check first 5 IMAGE regions (main exe + critical DLLs)
-            .collect();
-
-        for region in image_regions {
-            match validate_pe_header(pid, region.base_address) {
-                Ok(validation) => match validation {
-                    PEHeaderValidation::Valid => continue,
-                    PEHeaderValidation::InvalidDosSignature => {
-                        return Some(HollowingIndicator::InvalidPEHeader {
-                            validation: "Invalid DOS signature (not MZ)".to_string(),
-                        });
-                    }
-                    PEHeaderValidation::InvalidNtSignature => {
-                        return Some(HollowingIndicator::InvalidPEHeader {
-                            validation: "Invalid NT signature (not PE)".to_string(),
-                        });
-                    }
-                    PEHeaderValidation::InvalidHeaderOffset => {
-                        return Some(HollowingIndicator::InvalidPEHeader {
-                            validation: "Invalid PE header offset".to_string(),
-                        });
-                    }
-                    PEHeaderValidation::MismatchedImageBase => {
-                        return Some(HollowingIndicator::CorruptedPEStructure {
-                            address: region.base_address,
-                            reason: "Image base mismatch - possible hollowing".to_string(),
-                        });
-                    }
-                    PEHeaderValidation::SuspiciousEntryPoint => {
-                        return Some(HollowingIndicator::InvalidPEHeader {
-                            validation: "Suspicious entry point location".to_string(),
-                        });
-                    }
-                    PEHeaderValidation::CorruptedHeader => {
-                        return Some(HollowingIndicator::CorruptedPEStructure {
-                            address: region.base_address,
-                            reason: "Corrupted PE header structure".to_string(),
-                        });
-                    }
-                    PEHeaderValidation::NotPE => continue,
-                },
-                Err(_) => {
-                    // Could not read memory - might be suspicious but don't report
-                    continue;
-                }
-            }
-        }
-
-        None
-    }
-
-    #[cfg(not(windows))]
-    fn validate_pe_headers(
-        &self,
-        _pid: u32,
-        _regions: &[MemoryRegion],
-    ) -> Option<HollowingIndicator> {
-        // PE validation is Windows-specific
-        None
-    }
-
-    fn check_entry_point_anomalies(
-        &self,
-        _process: &ProcessInfo,
-        regions: &[MemoryRegion],
-    ) -> Option<HollowingIndicator> {
-        // In a real implementation, we would read the PE header to get the actual entry point
-        // For now, we'll use heuristics based on memory layout
-
-        // Look for executable regions that might contain the entry point
-        let executable_regions: Vec<_> = regions
-            .iter()
-            .filter(|r| {
-                matches!(
-                    r.protection,
-                    crate::MemoryProtection::ReadExecute
-                        | crate::MemoryProtection::ReadWriteExecute
-                ) && r.region_type == "PRIVATE"
-            })
-            .collect();
-
-        // If there are many small private executable regions, the entry point might have been moved
-        if executable_regions.len() > 5 {
-            // Pick the first region as a potential suspicious entry point
-            if let Some(region) = executable_regions.first() {
-                return Some(HollowingIndicator::UnusualEntryPoint {
-                    address: region.base_address,
-                });
-            }
-        }
-
-        None
-    }
-
-    /// Deep PE comparison with section hashing
-    #[cfg(windows)]
-    fn deep_pe_comparison(&self, process: &ProcessInfo) -> Option<Vec<HollowingIndicator>> {
-        use sha2::{Digest, Sha256};
-        use std::fs::File;
-        use std::io::Read;
-        use windows::Win32::Foundation::CloseHandle;
-        use windows::Win32::System::Diagnostics::Debug::ReadProcessMemory;
-        use windows::Win32::System::Threading::{OpenProcess, PROCESS_VM_READ};
-
-        let mut indicators = Vec::new();
-
-        // Get the path to the executable on disk
-        let disk_path = match &process.path {
-            Some(path) => path,
-            None => return None,
-        };
-
-        // Read PE from disk
-        let mut disk_file = match File::open(disk_path) {
-            Ok(f) => f,
-            Err(_) => return None,
-        };
-
-        let mut disk_data = Vec::new();
-        if disk_file.read_to_end(&mut disk_data).is_err() {
-            return None;
-        }
-
-        // Parse PE sections from disk
-        let disk_sections = match parse_pe_sections(&disk_data) {
-            Ok(sections) => sections,
-            Err(_) => return None,
-        };
-
-        // Read process memory
-        unsafe {
-            let handle = match OpenProcess(PROCESS_VM_READ, false, process.pid) {
-                Ok(h) => h,
-                Err(_) => return None,
-            };
-
-            // Assume base address (in real implementation, would enumerate modules)
-            let base_address = 0x400000usize;
-
-            // Read PE header from memory to get actual base
-            let mut header_buf = vec![0u8; 0x1000];
-            let mut bytes_read = 0usize;
-
-            if ReadProcessMemory(
-                handle,
-                base_address as *const _,
-                header_buf.as_mut_ptr() as *mut _,
-                header_buf.len(),
-                Some(&mut bytes_read),
-            )
-            .is_err()
-            {
-                let _ = CloseHandle(handle);
-                return None;
-            }
-
-            // Parse sections from memory
-            let memory_sections = match parse_pe_sections(&header_buf) {
-                Ok(sections) => sections,
-                Err(_) => {
-                    let _ = CloseHandle(handle);
-                    return None;
-                }
-            };
-
-            // Compare each section
-            for disk_section in &disk_sections {
-                // Find corresponding section in memory
-                if let Some(mem_section) =
-                    memory_sections.iter().find(|s| s.name == disk_section.name)
-                {
-                    // Read section data from memory
-                    let section_addr = base_address + mem_section.virtual_address;
-                    let mut section_data = vec![0u8; mem_section.size];
-                    let mut section_bytes_read = 0usize;
-
-                    if ReadProcessMemory(
-                        handle,
-                        section_addr as *const _,
-                        section_data.as_mut_ptr() as *mut _,
-                        section_data.len(),
-                        Some(&mut section_bytes_read),
-                    )
-                    .is_ok()
-                        && section_bytes_read > 0
-                    {
-                        section_data.truncate(section_bytes_read);
-
-                        // Compare hashes for code sections
-                        if disk_section.is_code {
-                            let disk_hash = Sha256::digest(&disk_section.data);
-                            let memory_hash = Sha256::digest(&section_data);
-
-                            if disk_hash != memory_hash {
-                                // Calculate percentage difference
-                                let different_bytes = disk_section
-                                    .data
-                                    .iter()
-                                    .zip(section_data.iter())
-                                    .filter(|(a, b)| a != b)
-                                    .count();
-                                let total_bytes = disk_section.data.len().min(section_data.len());
-                                let modification_percentage =
-                                    (different_bytes as f32 / total_bytes as f32) * 100.0;
-
-                                if modification_percentage > 5.0 {
-                                    // More than 5% modified
-                                    indicators.push(HollowingIndicator::ModifiedCodeSection {
-                                        section_name: disk_section.name.clone(),
-                                        modification_percentage,
-                                    });
-                                }
-                            }
-                        }
-                    }
-                } else {
-                    // Section exists in disk but not in memory - suspicious
-                    if disk_section.is_code {
-                        indicators.push(HollowingIndicator::CorruptedPEStructure {
-                            address: base_address,
-                            reason: format!("Missing section: {}", disk_section.name),
-                        });
-                    }
-                }
-            }
-
-            let _ = CloseHandle(handle);
-        }
-
-        if indicators.is_empty() {
-            None
-        } else {
-            Some(indicators)
-        }
-    }
-
-    #[cfg(not(windows))]
-    fn deep_pe_comparison(&self, _process: &ProcessInfo) -> Option<Vec<HollowingIndicator>> {
-        None
-    }
 }
 
 /// PE section information for comparison
