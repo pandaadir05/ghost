@@ -285,6 +285,12 @@ impl DynamicYaraEngine {
 
         // Scan each executable memory region
         for region in memory_regions {
+            // Reduce false positives by focusing on unbacked/private executable pages.
+            // Scanning IMAGE-backed code pages tends to match benign byte patterns.
+            if region.region_type != "PRIVATE" {
+                continue;
+            }
+
             // Only scan executable regions with reasonable size
             if !region.protection.is_executable() {
                 continue;
@@ -379,28 +385,37 @@ impl DynamicYaraEngine {
 
             let threat_level = ThreatLevel::from_metadata(&metadata);
 
-            // Extract matched strings
-            let mut matched_strings = Vec::new();
+            // Extract matched string identifiers and pick the earliest match offset.
+            // Returning per-string matches causes huge duplication and inflated confidence.
+            let mut matched_string_ids: Vec<String> = Vec::new();
+            let mut earliest_offset: Option<u64> = None;
+            let mut earliest_length: u32 = 0;
+
             for string in rule.strings {
                 let identifier = string.identifier.to_string();
-                for m in string.matches {
-                    matched_strings.push(format!(
-                        "{} at offset {:#x}",
-                        identifier,
-                        base_address + m.offset
-                    ));
-
-                    // Create a match entry for each string match
-                    matches.push(RuleMatch {
-                        rule_name: rule_name.clone(),
-                        namespace: namespace.clone(),
-                        threat_level,
-                        offset: (base_address + m.offset) as u64,
-                        length: m.length as u32,
-                        metadata: metadata.clone(),
-                        matched_strings: vec![identifier.clone()],
-                    });
+                if !matched_string_ids.iter().any(|s| s == &identifier) {
+                    matched_string_ids.push(identifier);
                 }
+
+                for m in string.matches {
+                    let offset = m.offset as u64;
+                    if earliest_offset.map_or(true, |prev| offset < prev) {
+                        earliest_offset = Some(offset);
+                        earliest_length = m.length as u32;
+                    }
+                }
+            }
+
+            if let Some(rule_offset) = earliest_offset {
+                matches.push(RuleMatch {
+                    rule_name,
+                    namespace,
+                    threat_level,
+                    offset: (base_address as u64).saturating_add(rule_offset),
+                    length: earliest_length,
+                    metadata,
+                    matched_strings: matched_string_ids,
+                });
             }
         }
 
