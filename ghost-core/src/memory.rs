@@ -271,11 +271,6 @@ pub fn validate_pe_header(pid: u32, base_address: usize) -> anyhow::Result<PEHea
     let optional_header =
         unsafe { std::ptr::read(optional_header_bytes.as_ptr() as *const ImageOptionalHeader64) };
 
-    // Validate image base matches memory address
-    if optional_header.image_base != base_address as u64 {
-        return Ok(PEHeaderValidation::MismatchedImageBase);
-    }
-
     // Validate entry point (should be within the image)
     let entry_point_rva = optional_header.address_of_entry_point;
     if entry_point_rva == 0 || entry_point_rva >= optional_header.size_of_image {
