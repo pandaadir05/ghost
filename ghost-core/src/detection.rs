@@ -116,7 +116,13 @@ impl DetectionEngine {
                     );
                     Some(engine)
                 } else {
-                    log::warn!("YARA rules not compiled, engine disabled");
+                    if cfg!(feature = "yara-scanning") {
+                        log::warn!("YARA rules not compiled, engine disabled");
+                    } else {
+                        log::warn!(
+                            "YARA scanning is disabled (build with --features yara-scanning)"
+                        );
+                    }
                     None
                 }
             }
@@ -286,7 +292,7 @@ impl DetectionEngine {
 
             if let Ok(yara_result) = yara_result {
                 if !yara_result.matches.is_empty() {
-                    log::info!(
+                    log::debug!(
                         "YARA scan found {} matches in {} ms",
                         yara_result.matches.len(),
                         yara_result.scan_time_ms
@@ -364,6 +370,9 @@ impl DetectionEngine {
                 rwx_regions: rwx_count,
             },
         );
+
+        // Normalize confidence to [0, 1] to avoid nonsensical percentages.
+        confidence = confidence.clamp(0.0, 1.0);
 
         let threat_level = if confidence >= 0.7 {
             ThreatLevel::Malicious

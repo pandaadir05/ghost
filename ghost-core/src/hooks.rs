@@ -454,7 +454,7 @@ mod platform {
                             memory_reader,
                         ) {
                             Ok(iat_result) => {
-                                log::info!(
+                                log::debug!(
                                     "IAT scan for {}: {}/{} imports hooked ({:.1}%)",
                                     module_name,
                                     iat_result.hooked_imports.len(),
