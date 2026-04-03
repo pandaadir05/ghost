@@ -46,19 +46,19 @@ mod tests {
             MemoryRegion {
                 base_address: 0x10000000,
                 size: 0x800, // Small size
-                protection: MemoryProtection::ReadExecute,
+                protection: MemoryProtection::ReadWriteExecute,
                 region_type: "PRIVATE".to_string(),
             },
             MemoryRegion {
                 base_address: 0x20000000,
                 size: 0x600, // Small size
-                protection: MemoryProtection::ReadExecute,
+                protection: MemoryProtection::ReadWriteExecute,
                 region_type: "PRIVATE".to_string(),
             },
             MemoryRegion {
                 base_address: 0x30000000,
                 size: 0x400, // Small size
-                protection: MemoryProtection::ReadExecute,
+                protection: MemoryProtection::ReadWriteExecute,
                 region_type: "PRIVATE".to_string(),
             },
         ];
