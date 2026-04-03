@@ -126,3 +126,21 @@ pub use webhook::{AlertPayload, WebhookConfig, WebhookNotifier, WebhookType};
 pub use yara_engine::{
     DynamicYaraEngine, RuleMatch, ThreatLevel as YaraThreatLevel, YaraRuleMetadata, YaraScanResult,
 };
+
+// Windows-GNU linking shim:
+// Vendored YARA modules call CryptoAPI / token APIs that live in `advapi32`.
+// The upstream build scripts don't always add this dependency for the GNU toolchain,
+// so we force-link it when `yara-scanning` is enabled.
+#[cfg(all(windows, target_env = "gnu", feature = "yara-scanning"))]
+#[link(name = "advapi32")]
+extern "system" {
+    // Not called; exists only to force `-ladvapi32` during linking.
+    #[allow(dead_code)]
+    fn CryptAcquireContextA(
+        phProv: *mut core::ffi::c_void,
+        pszContainer: *const i8,
+        pszProvider: *const i8,
+        dwProvType: u32,
+        dwFlags: u32,
+    ) -> i32;
+}
