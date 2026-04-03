@@ -123,6 +123,7 @@ pub enum MemoryProtection {
     ReadWriteExecute,
     Execute,
     WriteCopy,
+    ExecuteWriteCopy,
     Unknown,
 }
 
@@ -136,6 +137,7 @@ impl MemoryProtection {
                 | Self::ReadExecute
                 | Self::ReadWriteExecute
                 | Self::WriteCopy
+                | Self::ExecuteWriteCopy
         )
     }
 
@@ -143,7 +145,7 @@ impl MemoryProtection {
     pub fn is_writable(&self) -> bool {
         matches!(
             self,
-            Self::ReadWrite | Self::ReadWriteExecute | Self::WriteCopy
+            Self::ReadWrite | Self::ReadWriteExecute | Self::WriteCopy | Self::ExecuteWriteCopy
         )
     }
 
@@ -151,7 +153,7 @@ impl MemoryProtection {
     pub fn is_executable(&self) -> bool {
         matches!(
             self,
-            Self::ReadExecute | Self::ReadWriteExecute | Self::Execute
+            Self::ReadExecute | Self::ReadWriteExecute | Self::Execute | Self::ExecuteWriteCopy
         )
     }
 }
@@ -166,6 +168,7 @@ impl fmt::Display for MemoryProtection {
             Self::ReadWriteExecute => "RWX",
             Self::Execute => "--X",
             Self::WriteCopy => "WC-",
+            Self::ExecuteWriteCopy => "XWC",
             Self::Unknown => "???",
         };
         write!(f, "{}", s)
@@ -415,9 +418,8 @@ mod platform {
             p if p == PAGE_EXECUTE.0 => MemoryProtection::Execute,
             p if p == PAGE_EXECUTE_READ.0 => MemoryProtection::ReadExecute,
             p if p == PAGE_EXECUTE_READWRITE.0 => MemoryProtection::ReadWriteExecute,
-            p if p == PAGE_WRITECOPY.0 || p == PAGE_EXECUTE_WRITECOPY.0 => {
-                MemoryProtection::WriteCopy
-            }
+            p if p == PAGE_WRITECOPY.0 => MemoryProtection::WriteCopy,
+            p if p == PAGE_EXECUTE_WRITECOPY.0 => MemoryProtection::ExecuteWriteCopy,
             _ => MemoryProtection::Unknown,
         }
     }
