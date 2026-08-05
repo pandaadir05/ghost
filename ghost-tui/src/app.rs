@@ -97,10 +97,21 @@ pub struct MemoryStats {
     pub total_committed_mb: f64,
 }
 
+/// Result of a full system scan, produced without holding the shared app state.
+#[derive(Debug)]
+pub struct ScanOutcome {
+    pub processes: Vec<ProcessInfo>,
+    pub detections: Vec<DetectionEvent>,
+    pub suspicious_count: usize,
+    pub malicious_count: usize,
+    pub detection_count: usize,
+    pub scan_time_ms: u64,
+    pub memory_stats: MemoryStats,
+}
+
 #[derive(Debug)]
 pub struct App {
     pub current_tab: TabIndex,
-    pub detection_engine: DetectionEngine,
     pub threat_intel: ThreatIntelligence,
     pub processes: Vec<ProcessInfo>,
     pub detections: VecDeque<DetectionEvent>,
@@ -124,12 +135,11 @@ pub struct App {
 }
 
 impl App {
-    /// Creates a new application instance with initialized detection engine.
+    /// Creates a new application instance.
     ///
     /// # Errors
     ///
-    /// Returns an error if the detection engine or threat intelligence
-    /// system fails to initialize.
+    /// Returns an error if the threat intelligence system fails to initialize.
     pub async fn new() -> Result<Self> {
         let mut threat_intel = ThreatIntelligence::new();
         // Don't block on threat feed initialization - do it in background
@@ -142,12 +152,8 @@ impl App {
         // Re-create threat_intel since we moved it
         let threat_intel = ThreatIntelligence::new();
 
-        let detection_engine = DetectionEngine::new()
-            .map_err(|e| anyhow::anyhow!("Failed to initialize detection engine: {}", e))?;
-
         let mut app = Self {
             current_tab: TabIndex::Overview,
-            detection_engine,
             threat_intel,
             processes: Vec::new(),
             detections: VecDeque::new(),
@@ -194,19 +200,19 @@ impl App {
 
     /// Performs a full system scan for process injection indicators.
     ///
-    /// This method enumerates all running processes, analyzes their memory
-    /// regions and threads, and records any suspicious or malicious findings.
-    pub async fn update_scan_data(&mut self) -> Result<()> {
+    /// This enumerates all running processes and analyzes their memory
+    /// regions and threads. It deliberately takes the detection engine
+    /// instead of `&mut self` so the scan can run without holding the
+    /// shared app state - locking the app for the duration of a scan
+    /// blanks the UI and drops input. Apply the result with
+    /// [`App::apply_scan`], which only needs the lock briefly.
+    pub fn perform_scan(engine: &mut DetectionEngine) -> Result<ScanOutcome> {
         let scan_start = Instant::now();
 
-        self.processes = match process::enumerate_processes() {
-            Ok(procs) => procs,
-            Err(e) => {
-                self.add_log_message(format!("Process enumeration failed: {}", e));
-                return Err(anyhow::anyhow!("Process enumeration failed: {}", e));
-            }
-        };
+        let processes = process::enumerate_processes()
+            .map_err(|e| anyhow::anyhow!("Process enumeration failed: {}", e))?;
 
+        let mut detections = Vec::new();
         let mut detection_count = 0;
         let mut suspicious_count = 0;
         let mut malicious_count = 0;
@@ -219,7 +225,6 @@ impl App {
         let mut largest_region: u64 = 0;
         let mut total_committed: u64 = 0;
 
-        let processes = self.processes.clone();
         for proc in &processes {
             if Self::should_skip_process(proc) {
                 continue;
@@ -255,9 +260,7 @@ impl App {
             }
 
             let threads = thread::enumerate_threads(proc.pid).ok();
-            let result = self
-                .detection_engine
-                .analyze_process(proc, &regions, threads.as_deref());
+            let result = engine.analyze_process(proc, &regions, threads.as_deref());
 
             match result.threat_level {
                 ThreatLevel::Suspicious => suspicious_count += 1,
@@ -267,7 +270,7 @@ impl App {
 
             if result.threat_level != ThreatLevel::Clean {
                 detection_count += 1;
-                self.add_detection(DetectionEvent {
+                detections.push(DetectionEvent {
                     timestamp: Utc::now(),
                     process: proc.clone(),
                     threat_level: result.threat_level,
@@ -278,48 +281,54 @@ impl App {
             }
         }
 
-        let scan_duration = scan_start.elapsed();
+        Ok(ScanOutcome {
+            processes,
+            detections,
+            suspicious_count,
+            malicious_count,
+            detection_count,
+            scan_time_ms: scan_start.elapsed().as_millis() as u64,
+            memory_stats: MemoryStats {
+                total_regions,
+                rwx_regions,
+                private_regions,
+                shared_regions: total_regions.saturating_sub(private_regions),
+                suspicious_allocations,
+                largest_region_mb: largest_region as f64 / 1024.0 / 1024.0,
+                total_committed_mb: total_committed as f64 / 1024.0 / 1024.0,
+            },
+        })
+    }
 
+    /// Applies a completed scan to the app state. Cheap - safe to call
+    /// while holding the shared lock.
+    pub fn apply_scan(&mut self, outcome: ScanOutcome) {
+        self.processes = outcome.processes;
+        for detection in outcome.detections {
+            self.add_detection(detection);
+        }
+        self.memory_stats = outcome.memory_stats;
         self.stats = SystemStats {
             total_processes: self.processes.len(),
-            suspicious_processes: suspicious_count,
-            malicious_processes: malicious_count,
+            suspicious_processes: outcome.suspicious_count,
+            malicious_processes: outcome.malicious_count,
             total_detections: self.detections.len(),
-            scan_time_ms: scan_duration.as_millis() as u64,
+            scan_time_ms: outcome.scan_time_ms,
             memory_usage_mb: self.estimate_memory_usage(),
         };
-
-        self.memory_stats = MemoryStats {
-            total_regions,
-            rwx_regions,
-            private_regions,
-            shared_regions: total_regions.saturating_sub(private_regions),
-            suspicious_allocations,
-            largest_region_mb: largest_region as f64 / 1024.0 / 1024.0,
-            total_committed_mb: total_committed as f64 / 1024.0 / 1024.0,
-        };
-
-        self.last_scan = Some(scan_start);
-
+        self.last_scan = Some(Instant::now());
         self.add_log_message(format!(
             "Scan complete: {} processes, {} detections in {}ms",
             self.processes.len(),
-            detection_count,
-            scan_duration.as_millis()
+            outcome.detection_count,
+            outcome.scan_time_ms
         ));
-
-        Ok(())
     }
 
     /// Determines if a process should be skipped during scanning.
     fn should_skip_process(proc: &ProcessInfo) -> bool {
         const SKIP_PROCESSES: &[&str] = &["System", "Registry", "Idle", "smss.exe"];
         SKIP_PROCESSES.iter().any(|&name| proc.name == name) || proc.pid == 0 || proc.pid == 4
-    }
-
-    pub async fn force_refresh(&mut self) -> Result<()> {
-        self.add_log_message("Forcing refresh...".to_string());
-        self.update_scan_data().await
     }
 
     pub fn add_detection(&mut self, detection: DetectionEvent) {
