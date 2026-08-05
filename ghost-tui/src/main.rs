@@ -122,7 +122,7 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: Arc<Mutex<App>>) -
             if let Event::Key(key) = event::read()? {
                 if key.kind == KeyEventKind::Press {
                     match key.code {
-                        KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => return Ok(()),
+                        KeyCode::Char('q') | KeyCode::Char('Q') => return Ok(()),
                         KeyCode::Tab | KeyCode::Right => {
                             if let Ok(mut app) = app.try_lock() {
                                 app.next_tab();
