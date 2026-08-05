@@ -27,6 +27,8 @@ pub enum TabIndex {
 }
 
 impl TabIndex {
+    pub const COUNT: usize = 6;
+
     pub fn from_index(index: usize) -> Self {
         match index {
             0 => TabIndex::Overview,
@@ -40,7 +42,11 @@ impl TabIndex {
     }
 
     pub fn next(self) -> Self {
-        Self::from_index((self as usize + 1) % 6)
+        Self::from_index((self as usize + 1) % Self::COUNT)
+    }
+
+    pub fn prev(self) -> Self {
+        Self::from_index((self as usize + Self::COUNT - 1) % Self::COUNT)
     }
 }
 
@@ -172,7 +178,10 @@ impl App {
             max_detection_entries: 500,
         };
 
-        app.add_log_message("Ghost TUI v0.1.0 - Process Injection Detection".into());
+        app.add_log_message(format!(
+            "Ghost TUI v{} - Process Injection Detection",
+            env!("CARGO_PKG_VERSION")
+        ));
         app.add_log_message("Detection engine initialized successfully".into());
         app.add_log_message("Starting initial scan...".into());
 
@@ -314,6 +323,20 @@ impl App {
     }
 
     pub fn add_detection(&mut self, detection: DetectionEvent) {
+        // Periodic rescans report the same findings every pass; skip exact
+        // repeats for a process so the history only records changes.
+        if let Some(existing) = self
+            .detections
+            .iter()
+            .find(|d| d.process.pid == detection.process.pid)
+        {
+            if existing.threat_level == detection.threat_level
+                && existing.indicators == detection.indicators
+            {
+                return;
+            }
+        }
+
         // Add to front of deque for most recent first
         self.detections.push_front(detection);
 
@@ -337,56 +360,78 @@ impl App {
 
     pub fn clear_detections(&mut self) {
         self.detections.clear();
+        self.detections_state.select(None);
         self.add_log_message("Detection history cleared".to_string());
+    }
+
+    pub fn clear_logs(&mut self) {
+        self.logs.clear();
+        self.logs_state.select(None);
+        self.add_log_message("Logs cleared".to_string());
+    }
+
+    /// Clears the data associated with the current tab.
+    pub fn clear_current(&mut self) {
+        match self.current_tab {
+            TabIndex::Logs => self.clear_logs(),
+            TabIndex::Overview | TabIndex::Detections => self.clear_detections(),
+            _ => {}
+        }
     }
 
     pub fn next_tab(&mut self) {
         self.current_tab = self.current_tab.next();
     }
 
+    pub fn prev_tab(&mut self) {
+        self.current_tab = self.current_tab.prev();
+    }
+
+    /// Returns the previous index, wrapping to the end. `None` when the list is empty.
+    fn wrap_prev(current: Option<usize>, len: usize) -> Option<usize> {
+        if len == 0 {
+            return None;
+        }
+        match current {
+            Some(i) if i > 0 => Some(i - 1),
+            _ => Some(len - 1),
+        }
+    }
+
+    /// Returns the next index, wrapping to the start. `None` when the list is empty.
+    fn wrap_next(current: Option<usize>, len: usize) -> Option<usize> {
+        if len == 0 {
+            return None;
+        }
+        match current {
+            Some(i) if i + 1 < len => Some(i + 1),
+            _ => Some(0),
+        }
+    }
+
     pub fn scroll_up(&mut self) {
         match self.current_tab {
             TabIndex::Processes => {
-                let i = match self.processes_state.selected() {
-                    Some(i) => {
-                        if i == 0 {
-                            self.processes.len() - 1
-                        } else {
-                            i - 1
-                        }
-                    }
-                    None => 0,
-                };
-                self.processes_state.select(Some(i));
-                if let Some(process) = self.processes.get(i) {
+                let i = Self::wrap_prev(self.processes_state.selected(), self.processes.len());
+                self.processes_state.select(i);
+                if let Some(process) = i.and_then(|i| self.processes.get(i)) {
                     self.selected_process = Some(process.clone());
                 }
             }
             TabIndex::Detections => {
-                let i = match self.detections_state.selected() {
-                    Some(i) => {
-                        if i == 0 {
-                            self.detections.len() - 1
-                        } else {
-                            i - 1
-                        }
-                    }
-                    None => 0,
-                };
-                self.detections_state.select(Some(i));
+                let i = Self::wrap_prev(self.detections_state.selected(), self.detections.len());
+                self.detections_state.select(i);
             }
             TabIndex::Logs => {
-                let i = match self.logs_state.selected() {
-                    Some(i) => {
-                        if i == 0 {
-                            self.logs.len() - 1
-                        } else {
-                            i - 1
-                        }
-                    }
-                    None => 0,
-                };
-                self.logs_state.select(Some(i));
+                let i = Self::wrap_prev(self.logs_state.selected(), self.logs.len());
+                self.logs_state.select(i);
+            }
+            TabIndex::ThreatIntel => {
+                let i = Self::wrap_prev(
+                    self.threat_intel_state.selected(),
+                    self.threat_intel_data.recent_iocs.len(),
+                );
+                self.threat_intel_state.select(i);
             }
             _ => {}
         }
@@ -395,46 +440,26 @@ impl App {
     pub fn scroll_down(&mut self) {
         match self.current_tab {
             TabIndex::Processes => {
-                let i = match self.processes_state.selected() {
-                    Some(i) => {
-                        if i >= self.processes.len() - 1 {
-                            0
-                        } else {
-                            i + 1
-                        }
-                    }
-                    None => 0,
-                };
-                self.processes_state.select(Some(i));
-                if let Some(process) = self.processes.get(i) {
+                let i = Self::wrap_next(self.processes_state.selected(), self.processes.len());
+                self.processes_state.select(i);
+                if let Some(process) = i.and_then(|i| self.processes.get(i)) {
                     self.selected_process = Some(process.clone());
                 }
             }
             TabIndex::Detections => {
-                let i = match self.detections_state.selected() {
-                    Some(i) => {
-                        if i >= self.detections.len() - 1 {
-                            0
-                        } else {
-                            i + 1
-                        }
-                    }
-                    None => 0,
-                };
-                self.detections_state.select(Some(i));
+                let i = Self::wrap_next(self.detections_state.selected(), self.detections.len());
+                self.detections_state.select(i);
             }
             TabIndex::Logs => {
-                let i = match self.logs_state.selected() {
-                    Some(i) => {
-                        if i >= self.logs.len() - 1 {
-                            0
-                        } else {
-                            i + 1
-                        }
-                    }
-                    None => 0,
-                };
-                self.logs_state.select(Some(i));
+                let i = Self::wrap_next(self.logs_state.selected(), self.logs.len());
+                self.logs_state.select(i);
+            }
+            TabIndex::ThreatIntel => {
+                let i = Self::wrap_next(
+                    self.threat_intel_state.selected(),
+                    self.threat_intel_data.recent_iocs.len(),
+                );
+                self.threat_intel_state.select(i);
             }
             _ => {}
         }

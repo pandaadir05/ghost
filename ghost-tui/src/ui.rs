@@ -87,17 +87,19 @@ fn draw_header(f: &mut Frame, area: Rect, app: &App) {
 fn draw_footer(f: &mut Frame, area: Rect, app: &App) {
     let help_text = match app.current_tab {
         TabIndex::Overview => {
-            "Up/Down: Navigate | Tab: Switch tabs | R: Refresh | C: Clear | Q: Quit"
+            "Tab/Shift+Tab: Switch tabs | R: Refresh | C: Clear detections | Q: Quit"
         }
         TabIndex::Processes => {
-            "Up/Down: Select process | Enter: View details | Tab: Switch tabs | Q: Quit"
+            "Up/Down: Select process | Enter: View details | Tab: Switch tabs | R: Refresh | Q: Quit"
         }
         TabIndex::Detections => {
             "Up/Down: Navigate detections | C: Clear history | Tab: Switch tabs | Q: Quit"
         }
-        TabIndex::Memory => "Up/Down: Navigate | Tab: Switch tabs | R: Refresh | Q: Quit",
+        TabIndex::Memory => "Tab/Shift+Tab: Switch tabs | R: Refresh | Q: Quit",
         TabIndex::Logs => "Up/Down: Navigate logs | C: Clear logs | Tab: Switch tabs | Q: Quit",
-        TabIndex::ThreatIntel => "Up/Down: Navigate threats | Tab: Switch tabs | Q: Quit",
+        TabIndex::ThreatIntel => {
+            "Up/Down: Navigate IOCs | Tab: Switch tabs | R: Refresh | Q: Quit"
+        }
     };
 
     let footer = Paragraph::new(help_text)
@@ -164,11 +166,13 @@ fn draw_stats_panel(f: &mut Frame, area: Rect, app: &App) {
                 .border_style(Style::default().fg(WARNING)),
         )
         .gauge_style(Style::default().fg(WARNING))
-        .percent(if app.stats.total_processes > 0 {
-            (app.stats.suspicious_processes.saturating_mul(100) / app.stats.total_processes) as u16
-        } else {
-            0
-        })
+        .percent(
+            app.stats
+                .suspicious_processes
+                .saturating_mul(100)
+                .checked_div(app.stats.total_processes)
+                .unwrap_or(0) as u16,
+        )
         .label(format!("{}", app.stats.suspicious_processes));
 
     f.render_widget(suspicious_gauge, stats_chunks[1]);
@@ -181,11 +185,13 @@ fn draw_stats_panel(f: &mut Frame, area: Rect, app: &App) {
                 .border_style(Style::default().fg(DANGER)),
         )
         .gauge_style(Style::default().fg(DANGER))
-        .percent(if app.stats.total_processes > 0 {
-            (app.stats.malicious_processes.saturating_mul(100) / app.stats.total_processes) as u16
-        } else {
-            0
-        })
+        .percent(
+            app.stats
+                .malicious_processes
+                .saturating_mul(100)
+                .checked_div(app.stats.total_processes)
+                .unwrap_or(0) as u16,
+        )
         .label(format!("{}", app.stats.malicious_processes));
 
     f.render_widget(malicious_gauge, stats_chunks[2]);
@@ -198,7 +204,7 @@ fn draw_stats_panel(f: &mut Frame, area: Rect, app: &App) {
                 .border_style(Style::default().fg(SUCCESS)),
         )
         .gauge_style(Style::default().fg(SUCCESS))
-        .percent(std::cmp::min(app.stats.scan_time_ms as u16 / 10, 100))
+        .percent(std::cmp::min(app.stats.scan_time_ms / 10, 100) as u16)
         .label(format!("{}ms", app.stats.scan_time_ms));
 
     f.render_widget(perf_gauge, stats_chunks[3]);
@@ -240,6 +246,20 @@ fn draw_threat_gauge(f: &mut Frame, area: Rect, app: &App) {
 }
 
 fn draw_recent_detections(f: &mut Frame, area: Rect, app: &App) {
+    if app.detections.is_empty() {
+        let placeholder = Paragraph::new("No detections yet - system appears clean")
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title("Recent Detections")
+                    .border_style(Style::default().fg(SECONDARY)),
+            )
+            .style(Style::default().fg(MUTED))
+            .alignment(Alignment::Center);
+        f.render_widget(placeholder, area);
+        return;
+    }
+
     let items: Vec<ListItem> = app
         .detections
         .iter()
@@ -330,7 +350,8 @@ fn draw_processes(f: &mut Frame, area: Rect, app: &App) {
             .title("System Processes")
             .border_style(Style::default().fg(PRIMARY)),
     )
-    .row_highlight_style(Style::default().bg(PRIMARY).fg(BACKGROUND));
+    .row_highlight_style(Style::default().bg(PRIMARY).fg(BACKGROUND))
+    .highlight_symbol(">> ");
 
     let mut state = app.processes_state.clone();
     f.render_stateful_widget(table, chunks[0], &mut state);
@@ -367,6 +388,20 @@ fn draw_process_details(f: &mut Frame, area: Rect, app: &App) {
 }
 
 fn draw_detections(f: &mut Frame, area: Rect, app: &App) {
+    if app.detections.is_empty() {
+        let placeholder = Paragraph::new("No detections recorded\n\nPress R to force a scan")
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title("Detection History (0 total)")
+                    .border_style(Style::default().fg(DANGER)),
+            )
+            .style(Style::default().fg(MUTED))
+            .alignment(Alignment::Center);
+        f.render_widget(placeholder, area);
+        return;
+    }
+
     let items: Vec<ListItem> = app
         .detections
         .iter()
@@ -416,7 +451,9 @@ fn draw_detections(f: &mut Frame, area: Rect, app: &App) {
                 ))
                 .border_style(Style::default().fg(DANGER)),
         )
-        .style(Style::default().fg(TEXT));
+        .style(Style::default().fg(TEXT))
+        .highlight_style(Style::default().bg(PRIMARY).fg(BACKGROUND))
+        .highlight_symbol(">> ");
 
     let mut state = app.detections_state.clone();
     f.render_stateful_widget(list, area, &mut state);
@@ -453,7 +490,7 @@ fn draw_memory(f: &mut Frame, area: Rect, app: &App) {
                 .border_style(Style::default().fg(PRIMARY)),
         )
         .gauge_style(Style::default().fg(PRIMARY))
-        .percent(std::cmp::min((mem.total_regions / 100) as u16, 100))
+        .percent(std::cmp::min(mem.total_regions / 100, 100) as u16)
         .label(format!("{}", mem.total_regions));
 
     f.render_widget(regions_gauge, stats_chunks[0]);
@@ -470,7 +507,7 @@ fn draw_memory(f: &mut Frame, area: Rect, app: &App) {
                 })),
         )
         .gauge_style(Style::default().fg(if mem.rwx_regions > 0 { DANGER } else { SUCCESS }))
-        .percent(std::cmp::min((mem.rwx_regions * 10) as u16, 100))
+        .percent(std::cmp::min(mem.rwx_regions.saturating_mul(10), 100) as u16)
         .label(format!("{}", mem.rwx_regions));
 
     f.render_widget(rwx_gauge, stats_chunks[1]);
@@ -491,7 +528,7 @@ fn draw_memory(f: &mut Frame, area: Rect, app: &App) {
         } else {
             SUCCESS
         }))
-        .percent(std::cmp::min((mem.suspicious_allocations * 10) as u16, 100))
+        .percent(std::cmp::min(mem.suspicious_allocations.saturating_mul(10), 100) as u16)
         .label(format!("{}", mem.suspicious_allocations));
 
     f.render_widget(suspicious_gauge, stats_chunks[2]);
@@ -586,26 +623,26 @@ fn draw_memory(f: &mut Frame, area: Rect, app: &App) {
     // Memory analysis info
     let analysis_text = if mem.rwx_regions > 0 {
         format!(
-            "⚠ WARNING: {} RWX memory regions detected!\n\n\
+            "[!] WARNING: {} RWX memory regions detected!\n\n\
             RWX (Read-Write-Execute) memory is commonly used for:\n\
-            • Just-In-Time (JIT) compilation\n\
-            • Shellcode injection\n\
-            • Self-modifying code\n\n\
+            - Just-In-Time (JIT) compilation\n\
+            - Shellcode injection\n\
+            - Self-modifying code\n\n\
             {} suspicious allocations flagged for review.\n\n\
             Recommendations:\n\
-            • Review processes with RWX regions\n\
-            • Check for code injection indicators\n\
-            • Monitor for behavioral anomalies",
+            - Review processes with RWX regions\n\
+            - Check for code injection indicators\n\
+            - Monitor for behavioral anomalies",
             mem.rwx_regions, mem.suspicious_allocations
         )
     } else {
         format!(
-            "✓ No RWX memory regions detected\n\n\
+            "[+] No RWX memory regions detected\n\n\
             Memory Analysis Summary:\n\
-            • {} total memory regions scanned\n\
-            • {} private regions (process-specific)\n\
-            • {} shared regions (libraries/mapped files)\n\
-            • {:.2} MB total committed memory\n\n\
+            - {} total memory regions scanned\n\
+            - {} private regions (process-specific)\n\
+            - {} shared regions (libraries/mapped files)\n\
+            - {:.2} MB total committed memory\n\n\
             Status: Memory layout appears normal.\n\
             No immediate signs of code injection detected.",
             mem.total_regions, mem.private_regions, mem.shared_regions, mem.total_committed_mb
@@ -643,7 +680,9 @@ fn draw_logs(f: &mut Frame, area: Rect, app: &App) {
                 .title(format!("System Logs ({} entries)", app.logs.len()))
                 .border_style(Style::default().fg(SUCCESS)),
         )
-        .style(Style::default().fg(TEXT));
+        .style(Style::default().fg(TEXT))
+        .highlight_style(Style::default().bg(PRIMARY).fg(BACKGROUND))
+        .highlight_symbol(">> ");
 
     let mut state = app.logs_state.clone();
     f.render_stateful_widget(list, area, &mut state);
@@ -676,25 +715,25 @@ fn draw_feed_status(f: &mut Frame, area: Rect, app: &App) {
         vec![
             Row::new(vec![
                 Cell::from("AlienVault OTX"),
-                Cell::from("⚠ Not Connected").style(Style::default().fg(WARNING)),
+                Cell::from("[!] Not Connected").style(Style::default().fg(WARNING)),
                 Cell::from("-"),
                 Cell::from("0"),
             ]),
             Row::new(vec![
                 Cell::from("Abuse.ch"),
-                Cell::from("⚠ Not Connected").style(Style::default().fg(WARNING)),
+                Cell::from("[!] Not Connected").style(Style::default().fg(WARNING)),
                 Cell::from("-"),
                 Cell::from("0"),
             ]),
             Row::new(vec![
                 Cell::from("MISP Feed"),
-                Cell::from("⚠ Not Connected").style(Style::default().fg(WARNING)),
+                Cell::from("[!] Not Connected").style(Style::default().fg(WARNING)),
                 Cell::from("-"),
                 Cell::from("0"),
             ]),
             Row::new(vec![
                 Cell::from("Local Rules"),
-                Cell::from("✓ Active").style(Style::default().fg(SUCCESS)),
+                Cell::from("[+] Active").style(Style::default().fg(SUCCESS)),
                 Cell::from("Built-in"),
                 Cell::from("47"),
             ]),
@@ -773,7 +812,7 @@ fn draw_intel_stats(f: &mut Frame, area: Rect, app: &App) {
                 .border_style(Style::default().fg(PRIMARY)),
         )
         .gauge_style(Style::default().fg(PRIMARY))
-        .percent(std::cmp::min((total_iocs / 10) as u16, 100))
+        .percent(std::cmp::min(total_iocs / 10, 100) as u16)
         .label(format!("{}", total_iocs));
 
     f.render_widget(ioc_gauge, chunks[0]);
@@ -786,7 +825,7 @@ fn draw_intel_stats(f: &mut Frame, area: Rect, app: &App) {
                 .border_style(Style::default().fg(DANGER)),
         )
         .gauge_style(Style::default().fg(DANGER))
-        .percent(std::cmp::min((active_threats * 10) as u16, 100))
+        .percent(std::cmp::min(active_threats.saturating_mul(10), 100) as u16)
         .label(format!("{}", active_threats));
 
     f.render_widget(threats_gauge, chunks[1]);
@@ -799,7 +838,7 @@ fn draw_intel_stats(f: &mut Frame, area: Rect, app: &App) {
                 .border_style(Style::default().fg(WARNING)),
         )
         .gauge_style(Style::default().fg(WARNING))
-        .percent(std::cmp::min((matched * 20) as u16, 100))
+        .percent(std::cmp::min(matched.saturating_mul(20), 100) as u16)
         .label(format!("{}", matched));
 
     f.render_widget(matched_gauge, chunks[2]);
@@ -942,7 +981,9 @@ fn draw_ioc_list(f: &mut Frame, area: Rect, app: &App) {
                 .title("Indicators of Compromise")
                 .border_style(Style::default().fg(DANGER)),
         )
-        .style(Style::default().fg(TEXT));
+        .style(Style::default().fg(TEXT))
+        .highlight_style(Style::default().bg(PRIMARY).fg(BACKGROUND))
+        .highlight_symbol(">> ");
 
     let mut state = app.threat_intel_state.clone();
     f.render_stateful_widget(list, area, &mut state);

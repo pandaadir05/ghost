@@ -122,10 +122,15 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: Arc<Mutex<App>>) -
             if let Event::Key(key) = event::read()? {
                 if key.kind == KeyEventKind::Press {
                     match key.code {
-                        KeyCode::Char('q') => return Ok(()),
-                        KeyCode::Tab => {
+                        KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => return Ok(()),
+                        KeyCode::Tab | KeyCode::Right => {
                             if let Ok(mut app) = app.try_lock() {
                                 app.next_tab();
+                            }
+                        }
+                        KeyCode::BackTab | KeyCode::Left => {
+                            if let Ok(mut app) = app.try_lock() {
+                                app.prev_tab();
                             }
                         }
                         KeyCode::Up => {
@@ -143,16 +148,16 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: Arc<Mutex<App>>) -
                                 app.select_item();
                             }
                         }
-                        KeyCode::Char('r') => {
+                        KeyCode::Char('r') | KeyCode::Char('R') => {
                             if let Ok(mut app) = app.try_lock() {
                                 if let Err(e) = app.force_refresh().await {
                                     app.add_log_message(format!("Refresh error: {}", e));
                                 }
                             }
                         }
-                        KeyCode::Char('c') => {
+                        KeyCode::Char('c') | KeyCode::Char('C') => {
                             if let Ok(mut app) = app.try_lock() {
-                                app.clear_detections();
+                                app.clear_current();
                             }
                         }
                         _ => {}
