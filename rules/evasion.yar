@@ -54,24 +54,11 @@ rule Anti_VM_Techniques
         2 of them
 }
 
-rule Timing_Attacks
-{
-    meta:
-        description = "Detects timing-based anti-analysis techniques"
-        author = "Ghost Detection Engine"
-        threat_level = "low"
-        mitre_attack = "T1497.003"
-
-    strings:
-        $rdtsc = { 0F 31 }
-        $queryperformancecounter = "QueryPerformanceCounter" nocase
-        $gettickcount = "GetTickCount" nocase
-        $sleep = "Sleep" nocase
-        $timegettime = "timeGetTime" nocase
-
-    condition:
-        2 of them
-}
+// REMOVED: Timing_Attacks.
+// $rdtsc = { 0F 31 } is two bytes, and "Sleep" nocase substring-matches
+// SleepEx, SleepConditionVariableCS and the word "sleep" in any text. With
+// "2 of them" this was satisfied by essentially every binary that measures
+// elapsed time - i.e. all of them.
 
 rule API_Hashing_Obfuscation
 {
@@ -98,77 +85,66 @@ rule API_Hashing_Obfuscation
         2 of them
 }
 
-rule Memory_Evasion_Techniques
+// REMOVED: Memory_Evasion_Techniques.
+// "any of them" over the string "VirtualProtect" matched every PE import
+// table in every process. Calling VirtualProtect is capability, not malice.
+//
+// REMOVED: Heaven_Gate_Technique (superseded by Wow64_Transition below).
+// It required "2 of them" where two of the four strings were { 33 C0 }
+// ("xor eax,eax") and { 0F 05 } ("syscall"), both of which appear thousands
+// of times in ntdll's .text - and rules are scanned against ntdll in every
+// process. Only the far-jump string carried any signal.
+
+rule Wow64_Transition_Far_Jump
 {
     meta:
-        description = "Detects memory-based evasion techniques"
+        description = "Far jump to selector 0x33 (Heaven's Gate WoW64 transition)"
         author = "Ghost Detection Engine"
-        threat_level = "high"
-        mitre_attack = "T1562.001"
-
-    strings:
-        $virtualprotect = "VirtualProtect" nocase
-        $virtualprotectex = "VirtualProtectEx" nocase
-        $ntprotectvirtualmemory = "NtProtectVirtualMemory" nocase
-
-        // Memory permission changes
-        $mem_perm_1 = { 6A 40 68 00 30 00 00 }
-        $mem_perm_2 = { 68 00 00 40 00 }
-
-    condition:
-        any of them
-}
-
-rule Heaven_Gate_Technique
-{
-    meta:
-        description = "Detects Heaven's Gate (WoW64 bypass) technique"
-        author = "Ghost Detection Engine"
+        date = "2026-08-05"
         threat_level = "high"
         mitre_attack = "T1055"
+        scan_context = "memory_region"
 
     strings:
-        $heavens_gate_1 = { 33 C0 }
+        // jmp far 0033:xxxxxxxx
         $far_jump = { EA ?? ?? ?? ?? 33 00 }
-        $segment_switch = { 48 89 E5 48 83 EC ?? }
-        $wow64_syscall = { 0F 05 }
-
-    condition:
-        2 of them
-}
-
-rule AMSI_Bypass_Attempt
-{
-    meta:
-        description = "Detects AMSI bypass techniques"
-        author = "Ghost Detection Engine"
-        threat_level = "critical"
-        mitre_attack = "T1562.001"
-
-    strings:
-        $amsi_string = "AmsiScanBuffer" nocase
-        $amsi_context = "AmsiInitialize" nocase
-        $amsi_patch_1 = { B8 57 00 07 80 C3 }
-        $amsi_patch_2 = { 31 C0 C3 }
-        $amsi_bypass = "amsi.dll" nocase
-
-    condition:
-        2 of them
-}
-
-rule ETW_Bypass_Attempt
-{
-    meta:
-        description = "Detects ETW bypass techniques"
-        author = "Ghost Detection Engine"
-        threat_level = "high"
-        mitre_attack = "T1562.001"
-
-    strings:
-        $etw_string = "EtwEventWrite" nocase
-        $etw_provider = "EtwEventRegister" nocase
-        $etw_patch = { 33 C0 C2 14 00 }
+        // push 0x33 ; call - the retf-based variant
+        $push_33_call = { 6A 33 E8 }
 
     condition:
         any of them
+}
+
+rule AMSI_ETW_Inline_Patch_Stub
+{
+    meta:
+        description = "In-memory AMSI/ETW patch stub together with the corresponding API names"
+        author = "Ghost Detection Engine"
+        date = "2026-08-05"
+        threat_level = "critical"
+        mitre_attack = "T1562.001"
+        reference = "https://attack.mitre.org/techniques/T1562/001/"
+        scan_context = "memory_region"
+
+    strings:
+        // Patch stubs. The old rule also carried { 31 C0 C3 } ("xor eax,eax;
+        // ret"), which is ordinary compiler output and made the rule fire on
+        // every .NET and Office process at critical severity.
+        $amsi_x64 = { B8 57 00 07 80 C3 }        // mov eax,0x80070057 ; ret
+        $amsi_x86 = { B8 57 00 07 80 C2 18 00 }  // mov eax,0x80070057 ; ret 0x18
+        $etw_x64  = { 48 33 C0 C3 }              // xor rax,rax ; ret  (the x64 form,
+                                                 // which the old x86-only rule missed)
+        $etw_x86  = { 33 C0 C2 14 00 }           // xor eax,eax ; ret 0x14
+
+        $n1 = "AmsiScanBuffer" ascii
+        $n2 = "AmsiOpenSession" ascii
+        $n3 = "EtwEventWrite" ascii
+        $n4 = "NtTraceEvent" ascii
+        $n5 = "amsi.dll" ascii wide nocase
+
+    condition:
+        // A patch stub alone is compiler-ordinary; the API names alone are
+        // present in every instrumented binary. Requiring both, plus two
+        // independent name references, is what makes this specific.
+        2 of ($n*) and 1 of ($amsi_x64, $amsi_x86, $etw_x64, $etw_x86)
 }

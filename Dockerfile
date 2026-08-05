@@ -43,6 +43,10 @@ RUN useradd -r -s /bin/false ghost
 
 # Copy binary
 COPY --from=builder /app/target/release/ghost-cli /usr/local/bin/ghost
+# Detection rules must ship with the binary; without them the YARA engine
+# has nothing to load. GHOST_RULES_DIR points the engine at them.
+COPY rules /usr/local/share/ghost/rules
+ENV GHOST_RULES_DIR=/usr/local/share/ghost/rules
 
 # Set ownership and permissions
 RUN chown root:root /usr/local/bin/ghost && \

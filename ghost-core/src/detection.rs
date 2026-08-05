@@ -106,8 +106,9 @@ impl DetectionEngine {
         let evasion_detector = EvasionDetector::new();
         let mitre_engine = MitreAttackEngine::new()?;
 
-        // Initialize YARA engine with default rules directory
-        let yara_engine = match DynamicYaraEngine::new(Some("rules")) {
+        // Initialize YARA engine with the resolved rules directory
+        let rules_dir = Self::resolve_rules_dir();
+        let yara_engine = match DynamicYaraEngine::new(rules_dir.as_deref()) {
             Ok(engine) => {
                 if engine.is_compiled() {
                     log::info!(
@@ -606,6 +607,45 @@ impl DetectionEngine {
         // threads with `creation_time > 0` as "recently created", but that
         // field is an absolute FILETIME, so it is non-zero for every live
         // thread and the ratio was always 1.0.
+    }
+
+    /// Locates the YARA rules directory.
+    ///
+    /// The path used to be the bare relative literal "rules", so the engine
+    /// silently disabled itself whenever ghost ran from any directory other
+    /// than the source tree - which is every installed deployment. Look
+    /// next to the executable first, then at an explicit override, then the
+    /// working directory.
+    fn resolve_rules_dir() -> Option<String> {
+        if let Ok(dir) = std::env::var("GHOST_RULES_DIR") {
+            if std::path::Path::new(&dir).is_dir() {
+                return Some(dir);
+            }
+            log::warn!("GHOST_RULES_DIR is set but not a directory: {}", dir);
+        }
+
+        if let Ok(exe) = std::env::current_exe() {
+            for base in exe.parent().into_iter().chain(
+                exe.parent()
+                    .and_then(|p| p.parent())
+                    .and_then(|p| p.parent()),
+            ) {
+                let candidate = base.join("rules");
+                if candidate.is_dir() {
+                    return candidate.to_str().map(str::to_string);
+                }
+            }
+        }
+
+        if std::path::Path::new("rules").is_dir() {
+            return Some("rules".to_string());
+        }
+
+        log::warn!(
+            "No YARA rules directory found (set GHOST_RULES_DIR or place 'rules' \
+             next to the executable); signature scanning is disabled"
+        );
+        None
     }
 
     /// Indicators that carry a low base rate on clean systems, and so are
