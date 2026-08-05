@@ -279,9 +279,14 @@ impl DetectionEngine {
                 }
             }
 
+            // A real implant signature appears a handful of times. Thousands
+            // of hits means the pattern is describing ordinary code in this
+            // process (typically JIT output), not an implant.
+            const IMPLAUSIBLE_MATCH_COUNT: usize = 64;
+
             let mut shellcode_score = 0.0f32;
             for (sig, (count, first_addr, conf)) in &by_signature {
-                if *count < Self::min_occurrences_for(sig) {
+                if *count < Self::min_occurrences_for(sig) || *count > IMPLAUSIBLE_MATCH_COUNT {
                     continue;
                 }
                 indicators.push(format!(
