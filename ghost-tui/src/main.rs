@@ -172,8 +172,9 @@ async fn run_app<B: Backend>(
             terminal.draw(|f| ui::draw(f, &app))?;
         }
 
-        // Handle events
-        if event::poll(Duration::from_millis(100))? {
+        // Handle events. The short poll doubles as the redraw tick, which
+        // keeps the elapsed-scan timer moving.
+        if event::poll(Duration::from_millis(50))? {
             if let Event::Key(key) = event::read()? {
                 if key.kind == KeyEventKind::Press {
                     match key.code {

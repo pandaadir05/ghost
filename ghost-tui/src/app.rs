@@ -124,6 +124,8 @@ pub struct App {
     pub last_scan: Option<Instant>,
     /// `(scanned, total)` while a scan is in progress.
     pub scan_progress: Option<(usize, usize)>,
+    /// Start of the in-flight scan, for the live elapsed timer.
+    pub scan_started: Option<Instant>,
 
     // UI state
     pub processes_state: TableState,
@@ -179,6 +181,7 @@ impl App {
             },
             last_scan: None,
             scan_progress: None,
+            scan_started: None,
             processes_state: TableState::default(),
             detections_state: ListState::default(),
             logs_state: ListState::default(),
@@ -210,10 +213,21 @@ impl App {
         self.stats.total_processes = processes.len();
         self.stats.suspicious_processes = 0;
         self.stats.malicious_processes = 0;
+        self.stats.scan_time_ms = 0;
         self.memory_stats = MemoryStats::default();
         self.scan_progress = Some((0, processes.len()));
+        self.scan_started = Some(Instant::now());
         self.add_log_message(format!("Scanning {} processes...", processes.len()));
         self.processes = processes;
+    }
+
+    /// Elapsed time of the in-flight scan, or the last completed scan's
+    /// duration when idle. Drives the live timer in the UI.
+    pub fn scan_elapsed_ms(&self) -> u64 {
+        match self.scan_started {
+            Some(started) => started.elapsed().as_millis() as u64,
+            None => self.stats.scan_time_ms,
+        }
     }
 
     /// Analyzes a single process. This is the expensive part of a scan and
@@ -324,6 +338,7 @@ impl App {
         self.stats.total_detections = self.detections.len();
         self.stats.memory_usage_mb = self.estimate_memory_usage();
         self.scan_progress = None;
+        self.scan_started = None;
         self.last_scan = Some(Instant::now());
         self.add_log_message(format!(
             "Scan complete: {} processes, {} total detections in {}ms",

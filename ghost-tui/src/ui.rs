@@ -32,6 +32,17 @@ mod colors {
 
 use colors::*;
 
+/// Formats a millisecond duration compactly: `840ms`, `12.3s`, `4m50s`.
+fn format_duration(ms: u64) -> String {
+    if ms < 1000 {
+        format!("{}ms", ms)
+    } else if ms < 60_000 {
+        format!("{:.1}s", ms as f64 / 1000.0)
+    } else {
+        format!("{}m{:02}s", ms / 60_000, (ms % 60_000) / 1000)
+    }
+}
+
 pub fn draw(f: &mut Frame, app: &App) {
     let size = f.area();
 
@@ -63,12 +74,17 @@ pub fn draw(f: &mut Frame, app: &App) {
 }
 
 fn draw_header(f: &mut Frame, area: Rect, app: &App) {
+    // The elapsed timer lives in the header so it is visible from every tab.
+    let elapsed = format_duration(app.scan_elapsed_ms());
     let title = match app.scan_progress {
         Some((scanned, total)) => format!(
-            "Ghost - Process Injection Detection [scanning {}/{}]",
-            scanned, total
+            "Ghost - Process Injection Detection [scanning {}/{} - {}]",
+            scanned, total, elapsed
         ),
-        None => "Ghost - Process Injection Detection".to_string(),
+        None => format!(
+            "Ghost - Process Injection Detection [last scan {}]",
+            elapsed
+        ),
     };
 
     let titles = app.get_tab_titles();
@@ -126,9 +142,9 @@ fn draw_overview(f: &mut Frame, area: Rect, app: &App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(8), // Stats
-            Constraint::Length(8), // Threat level gauge
-            Constraint::Min(0),    // Recent detections
+            Constraint::Length(5), // Stats
+            Constraint::Length(3), // Threat level gauge
+            Constraint::Min(3),    // Recent detections
         ])
         .split(area);
 
@@ -204,16 +220,27 @@ fn draw_stats_panel(f: &mut Frame, area: Rect, app: &App) {
 
     f.render_widget(malicious_gauge, stats_chunks[2]);
 
+    // Counts up live during a scan rather than only on completion.
+    let elapsed_ms = app.scan_elapsed_ms();
+    let scanning = app.scan_progress.is_some();
     let perf_gauge = Gauge::default()
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .title("Scan Time (ms)")
+                .title(if scanning { "Scan Time" } else { "Last Scan" })
                 .border_style(Style::default().fg(SUCCESS)),
         )
         .gauge_style(Style::default().fg(SUCCESS))
-        .percent(std::cmp::min(app.stats.scan_time_ms / 10, 100) as u16)
-        .label(format!("{}ms", app.stats.scan_time_ms));
+        .percent(match app.scan_progress {
+            // during a scan the bar tracks progress, not a magic time constant
+            Some((scanned, total)) => scanned
+                .saturating_mul(100)
+                .checked_div(total)
+                .unwrap_or(0)
+                .min(100) as u16,
+            None => std::cmp::min(elapsed_ms / 100, 100) as u16,
+        })
+        .label(format_duration(elapsed_ms));
 
     f.render_widget(perf_gauge, stats_chunks[3]);
 }
@@ -410,42 +437,48 @@ fn draw_detections(f: &mut Frame, area: Rect, app: &App) {
         return;
     }
 
+    // Split: scrollable one-line-per-detection list, details for the selection.
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(5), Constraint::Length(10)])
+        .split(area);
+
+    // One line per detection. Multi-line items taller than the viewport are
+    // dropped entirely by the list widget, which left this tab blank when
+    // detections carried many indicators.
     let items: Vec<ListItem> = app
         .detections
         .iter()
         .map(|detection| {
-            let level_style = match detection.threat_level {
-                ThreatLevel::Malicious => Style::default().fg(DANGER),
-                ThreatLevel::Suspicious => Style::default().fg(WARNING),
-                ThreatLevel::Clean => Style::default().fg(SUCCESS),
+            let (marker, level_style) = match detection.threat_level {
+                ThreatLevel::Malicious => ("[!]", Style::default().fg(DANGER)),
+                ThreatLevel::Suspicious => ("[?]", Style::default().fg(WARNING)),
+                ThreatLevel::Clean => ("[+]", Style::default().fg(SUCCESS)),
             };
 
-            let content = vec![
-                Line::from(vec![
-                    Span::styled(
-                        format!("[{}] ", detection.timestamp.format("%Y-%m-%d %H:%M:%S")),
-                        Style::default().fg(MUTED),
-                    ),
-                    Span::styled(
-                        format!("{:?}", detection.threat_level),
-                        level_style.add_modifier(Modifier::BOLD),
-                    ),
-                ]),
-                Line::from(format!(
-                    "Process: {} (PID: {})",
-                    detection.process.name, detection.process.pid
-                )),
-                Line::from(format!("Confidence: {:.1}%", detection.confidence * 100.0)),
-                Line::from("Indicators:"),
-            ];
-
-            let mut all_lines = content;
-            for indicator in &detection.indicators {
-                all_lines.push(Line::from(format!("  - {}", indicator)));
-            }
-            all_lines.push(Line::from(""));
-
-            ListItem::new(Text::from(all_lines))
+            ListItem::new(Line::from(vec![
+                Span::styled(format!("{} ", marker), level_style),
+                Span::styled(
+                    format!("[{}] ", detection.timestamp.format("%H:%M:%S")),
+                    Style::default().fg(MUTED),
+                ),
+                Span::styled(
+                    format!("{:<24}", detection.process.name),
+                    level_style.add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    format!("PID {:<8}", detection.process.pid),
+                    Style::default().fg(TEXT),
+                ),
+                Span::styled(
+                    format!("{:>6.1}%  ", detection.confidence * 100.0),
+                    Style::default().fg(TEXT),
+                ),
+                Span::styled(
+                    format!("{} indicator(s)", detection.indicators.len()),
+                    Style::default().fg(MUTED),
+                ),
+            ]))
         })
         .collect();
 
@@ -464,16 +497,87 @@ fn draw_detections(f: &mut Frame, area: Rect, app: &App) {
         .highlight_symbol(">> ");
 
     let mut state = app.detections_state.clone();
-    f.render_stateful_widget(list, area, &mut state);
+    f.render_stateful_widget(list, chunks[0], &mut state);
+
+    draw_detection_details(f, chunks[1], app);
+}
+
+/// Details for the selected detection - indicators live here so the list
+/// rows stay one line tall and always render.
+fn draw_detection_details(f: &mut Frame, area: Rect, app: &App) {
+    let selected = app
+        .detections_state
+        .selected()
+        .and_then(|i| app.detections.get(i));
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title("Detection Details")
+        .border_style(Style::default().fg(SECONDARY));
+
+    let Some(detection) = selected else {
+        let hint = Paragraph::new("Select a detection with Up/Down to see its indicators")
+            .block(block)
+            .style(Style::default().fg(MUTED))
+            .alignment(Alignment::Center);
+        f.render_widget(hint, area);
+        return;
+    };
+
+    let level_style = match detection.threat_level {
+        ThreatLevel::Malicious => Style::default().fg(DANGER),
+        ThreatLevel::Suspicious => Style::default().fg(WARNING),
+        ThreatLevel::Clean => Style::default().fg(SUCCESS),
+    };
+
+    let mut lines = vec![Line::from(vec![
+        Span::styled(
+            format!(
+                "{} (PID {})  ",
+                detection.process.name, detection.process.pid
+            ),
+            Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            format!("{:?}", detection.threat_level),
+            level_style.add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            format!("  {:.1}%  ", detection.confidence * 100.0),
+            Style::default().fg(TEXT),
+        ),
+        Span::styled(
+            detection.timestamp.format("%Y-%m-%d %H:%M:%S").to_string(),
+            Style::default().fg(MUTED),
+        ),
+    ])];
+
+    if let Some(path) = detection.process.path.as_deref() {
+        lines.push(Line::from(Span::styled(
+            path.to_string(),
+            Style::default().fg(MUTED),
+        )));
+    }
+
+    for indicator in &detection.indicators {
+        lines.push(Line::from(format!("  - {}", indicator)));
+    }
+
+    let details = Paragraph::new(Text::from(lines))
+        .block(block)
+        .style(Style::default().fg(TEXT))
+        .wrap(Wrap { trim: true });
+
+    f.render_widget(details, area);
 }
 
 fn draw_memory(f: &mut Frame, area: Rect, app: &App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(8),  // Stats gauges
-            Constraint::Length(12), // Memory breakdown
-            Constraint::Min(0),     // Details
+            Constraint::Length(3), // Stats gauges
+            Constraint::Length(7), // Memory breakdown (header + 4 rows + borders)
+            Constraint::Min(3),    // Details
         ])
         .split(area);
 
@@ -697,12 +801,16 @@ fn draw_logs(f: &mut Frame, area: Rect, app: &App) {
 }
 
 fn draw_threat_intel(f: &mut Frame, area: Rect, app: &App) {
+    // Feeds need header + one row per feed + borders; the gauges need 3.
+    // Fixed 10/8 heights pushed the IOC list off screen in short terminals,
+    // so ask for the minimum and give the rest to the list.
+    let feed_rows = app.threat_intel_data.threat_feed_status.len().max(4) as u16;
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(10), // Feed status
-            Constraint::Length(8),  // Stats
-            Constraint::Min(0),     // IOC list
+            Constraint::Length(feed_rows + 3), // Feed status
+            Constraint::Length(3),             // Stats
+            Constraint::Min(3),                // IOC list
         ])
         .split(area);
 
@@ -720,32 +828,23 @@ fn draw_feed_status(f: &mut Frame, area: Rect, app: &App) {
     let feeds = &app.threat_intel_data.threat_feed_status;
 
     let rows: Vec<Row> = if feeds.is_empty() {
-        vec![
-            Row::new(vec![
-                Cell::from("AlienVault OTX"),
-                Cell::from("[!] Not Connected").style(Style::default().fg(WARNING)),
-                Cell::from("-"),
-                Cell::from("0"),
-            ]),
-            Row::new(vec![
-                Cell::from("Abuse.ch"),
-                Cell::from("[!] Not Connected").style(Style::default().fg(WARNING)),
-                Cell::from("-"),
-                Cell::from("0"),
-            ]),
-            Row::new(vec![
-                Cell::from("MISP Feed"),
-                Cell::from("[!] Not Connected").style(Style::default().fg(WARNING)),
-                Cell::from("-"),
-                Cell::from("0"),
-            ]),
-            Row::new(vec![
+        ["AlienVault OTX", "Abuse.ch", "MISP Feed"]
+            .iter()
+            .map(|name| {
+                Row::new(vec![
+                    Cell::from(*name),
+                    Cell::from("[!] Not Connected").style(Style::default().fg(WARNING)),
+                    Cell::from("-"),
+                    Cell::from("0"),
+                ])
+            })
+            .chain(std::iter::once(Row::new(vec![
                 Cell::from("Local Rules"),
                 Cell::from("[+] Active").style(Style::default().fg(SUCCESS)),
                 Cell::from("Built-in"),
                 Cell::from("47"),
-            ]),
-        ]
+            ])))
+            .collect()
     } else {
         feeds
             .iter()

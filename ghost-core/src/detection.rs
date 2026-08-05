@@ -365,6 +365,11 @@ impl DetectionEngine {
             },
         );
 
+        // Each indicator adds to the score, so a process with many of them
+        // accumulates well past 1.0 - clamp before it is reported as a
+        // percentage (unclamped scores rendered as e.g. "7679.2%").
+        let confidence = confidence.clamp(0.0, 1.0);
+
         let threat_level = if confidence >= 0.7 {
             ThreatLevel::Malicious
         } else if confidence >= 0.3 {
