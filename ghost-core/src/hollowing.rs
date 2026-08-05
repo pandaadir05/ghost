@@ -202,13 +202,13 @@ impl HollowingDetector {
             return Some(HollowingIndicator::UnmappedMainImage);
         }
 
-        // Check if the main image base is suspicious
-        // Most Windows executables load at predictable addresses
-        for region in &main_image_regions {
-            if region.base_address < 0x400000 || region.base_address > 0x80000000 {
-                return Some(HollowingIndicator::SuspiciousImageBase);
-            }
-        }
+        // NOTE: a numeric image-base range check used to live here, testing
+        // for 0x400000..0x80000000 - the 32-bit user address range. Under
+        // x64 + mandatory ASLR every module loads above that window, so it
+        // fired on every 64-bit process. Base address alone carries no
+        // hollowing signal; the real primitive is a main module that is
+        // missing from the loader list or whose memory is not MEM_IMAGE,
+        // which is covered by the UnmappedMainImage check above.
 
         None
     }
@@ -259,63 +259,28 @@ impl HollowingDetector {
         None
     }
 
-    fn check_memory_gaps(&self, regions: &[MemoryRegion]) -> Option<HollowingIndicator> {
-        // Sort regions by base address
-        let mut sorted_regions: Vec<_> = regions.iter().collect();
-        sorted_regions.sort_by_key(|r| r.base_address);
-
-        let mut gaps = Vec::new();
-
-        // Find gaps between consecutive regions
-        for window in sorted_regions.windows(2) {
-            let current_end = window[0].base_address + window[0].size;
-            let next_start = window[1].base_address;
-
-            if next_start > current_end {
-                let gap_size = next_start - current_end;
-                // Only consider significant gaps (> 64KB)
-                if gap_size > 0x10000 {
-                    gaps.push(gap_size);
-                }
-            }
-        }
-
-        // Look for suspicious gap patterns
-        let large_gaps = gaps.iter().filter(|&&gap| gap > 0x1000000).count(); // 16MB+
-        let total_gaps = gaps.len();
-
-        if large_gaps > 0 || total_gaps > 20 {
-            let largest_gap = gaps.iter().max().copied().unwrap_or(0);
-            return Some(HollowingIndicator::SuspiciousMemoryGaps {
-                gap_count: total_gaps,
-                largest_gap,
-            });
-        }
-
+    /// Gaps between committed regions are not a hollowing signal.
+    ///
+    /// `enumerate_memory_regions` only returns MEM_COMMIT regions, so every
+    /// reserved-but-uncommitted range reads as a "gap": each thread's 1 MB
+    /// stack reservation, every 64 KB allocation-granularity hole, and the
+    /// multi-gigabyte span between the heap and the DLL zone. Every real
+    /// process has hundreds of them, so this fired universally. A hole
+    /// punched *inside* a mapped image's SizeOfImage extent would be
+    /// meaningful; a hole in the address space is not.
+    fn check_memory_gaps(&self, _regions: &[MemoryRegion]) -> Option<HollowingIndicator> {
         None
     }
 
-    fn check_pe_header_anomalies(&self, regions: &[MemoryRegion]) -> Option<HollowingIndicator> {
-        // Look for IMAGE regions that might have mismatched PE headers
-        let image_regions: Vec<_> = regions
-            .iter()
-            .filter(|r| r.region_type == "IMAGE")
-            .collect();
-
-        // Check for unusual number of IMAGE regions
-        if image_regions.len() > 50 {
-            // Too many loaded modules might indicate DLL injection
-            return Some(HollowingIndicator::MismatchedPEHeader);
-        }
-
-        // Check for IMAGE regions at unusual addresses
-        for region in &image_regions {
-            // PE images should typically be aligned to 64KB boundaries
-            if region.base_address % 0x10000 != 0 {
-                return Some(HollowingIndicator::MismatchedPEHeader);
-            }
-        }
-
+    /// Region counts and alignment are not PE header anomalies.
+    ///
+    /// VirtualQueryEx splits every PE *section* into its own region, so one
+    /// DLL yields 5-7 IMAGE regions and any process with ~10 modules passed
+    /// the old ">50 regions" test. Likewise only a module's first section
+    /// sits on a 64 KB boundary; the rest are 4 KB page-aligned, so the
+    /// alignment test fired on the second region examined. Both reported
+    /// the misleading string "PE header mismatch detected".
+    fn check_pe_header_anomalies(&self, _regions: &[MemoryRegion]) -> Option<HollowingIndicator> {
         None
     }
 
@@ -325,22 +290,26 @@ impl HollowingDetector {
         pid: u32,
         regions: &[MemoryRegion],
     ) -> Option<HollowingIndicator> {
-        // Focus on main executable IMAGE regions
+        // Only a module's first section carries the PE header. Taking the
+        // first N IMAGE regions used to land on .text/.rdata/.data of the
+        // *same* module, whose bytes are code and data rather than "MZ",
+        // so every process reported "Invalid DOS signature". Validate only
+        // where a header can actually live: 64 KB-aligned region starts
+        // that really do begin with MZ.
         let image_regions: Vec<_> = regions
             .iter()
-            .filter(|r| r.region_type == "IMAGE")
-            .take(5) // Check first 5 IMAGE regions (main exe + critical DLLs)
+            .filter(|r| r.region_type == "IMAGE" && r.base_address % 0x10000 == 0)
+            .take(8)
             .collect();
 
         for region in image_regions {
             match validate_pe_header(pid, region.base_address) {
                 Ok(validation) => match validation {
                     PEHeaderValidation::Valid => continue,
-                    PEHeaderValidation::InvalidDosSignature => {
-                        return Some(HollowingIndicator::InvalidPEHeader {
-                            validation: "Invalid DOS signature (not MZ)".to_string(),
-                        });
-                    }
+                    // A region without MZ is simply not a module header
+                    // (section of a module, or a non-PE mapping) - not an
+                    // anomaly by itself.
+                    PEHeaderValidation::InvalidDosSignature => continue,
                     PEHeaderValidation::InvalidNtSignature => {
                         return Some(HollowingIndicator::InvalidPEHeader {
                             validation: "Invalid NT signature (not PE)".to_string(),
@@ -351,12 +320,12 @@ impl HollowingDetector {
                             validation: "Invalid PE header offset".to_string(),
                         });
                     }
-                    PEHeaderValidation::MismatchedImageBase => {
-                        return Some(HollowingIndicator::CorruptedPEStructure {
-                            address: region.base_address,
-                            reason: "Image base mismatch - possible hollowing".to_string(),
-                        });
-                    }
+                    // Windows never rewrites ImageBase in the mapped header,
+                    // so under ASLR the mapped value virtually never equals
+                    // the load address. This flagged every relocated module
+                    // in the OS. Detecting a substituted image requires
+                    // comparing the mapped header against the file on disk.
+                    PEHeaderValidation::MismatchedImageBase => continue,
                     PEHeaderValidation::SuspiciousEntryPoint => {
                         return Some(HollowingIndicator::InvalidPEHeader {
                             validation: "Suspicious entry point location".to_string(),

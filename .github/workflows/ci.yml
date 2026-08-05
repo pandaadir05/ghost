@@ -246,12 +246,20 @@ jobs:
         shell: bash
         run: |
           VERSION="${GITHUB_REF#refs/tags/v}"
+          # Ship the detection rules and license alongside the binaries -
+          # without rules/ the YARA engine has nothing to load.
+          STAGE="ghost-${VERSION}-${{ matrix.target }}"
+          mkdir -p "${STAGE}"
+          cp -r rules "${STAGE}/"
+          cp README.md LICENSE "${STAGE}/"
           if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
-            ARCHIVE="ghost-${VERSION}-${{ matrix.target }}.zip"
-            7z a "${ARCHIVE}" ./target/${{ matrix.target }}/release/ghost-cli.exe ./target/${{ matrix.target }}/release/ghost-tui.exe
+            cp ./target/${{ matrix.target }}/release/ghost-cli.exe ./target/${{ matrix.target }}/release/ghost-tui.exe "${STAGE}/"
+            ARCHIVE="${STAGE}.zip"
+            7z a "${ARCHIVE}" "${STAGE}"
           else
-            ARCHIVE="ghost-${VERSION}-${{ matrix.target }}.tar.gz"
-            tar czf "${ARCHIVE}" -C ./target/${{ matrix.target }}/release ghost-cli ghost-tui
+            cp ./target/${{ matrix.target }}/release/ghost-cli ./target/${{ matrix.target }}/release/ghost-tui "${STAGE}/"
+            ARCHIVE="${STAGE}.tar.gz"
+            tar czf "${ARCHIVE}" "${STAGE}"
           fi
           echo "ARCHIVE=${ARCHIVE}" >> $GITHUB_ENV
 

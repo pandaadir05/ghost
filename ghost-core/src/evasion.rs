@@ -790,17 +790,11 @@ impl TimingAnalyzer {
     fn detect_sleep_evasion(&self, _process: &ProcessInfo) -> Option<EvasionTechnique> {
         // Detect various sleep-based evasion techniques
         // This would analyze actual sleep patterns in a real implementation
-        Some(EvasionTechnique {
-            technique_name: "Sleep-based Evasion".to_string(),
-            mitre_id: "T1497.003".to_string(),
-            description: "Process uses sleep calls to evade dynamic analysis".to_string(),
-            confidence: 0.7,
-            indicators: vec![
-                "Extended sleep periods before malicious activity".to_string(),
-                "Random delay patterns".to_string(),
-            ],
-            severity: EvasionSeverity::Medium,
-        })
+        // Not implemented: this returned a hardcoded detection for every
+        // process, fabricating indicators that were never observed.
+        // Requires NtDelayExecution call tracing (ETW Threat-Intelligence),
+        // which this scanner does not collect.
+        None
     }
 
     fn detect_timing_anomalies(
@@ -809,17 +803,11 @@ impl TimingAnalyzer {
         _threads: &[ThreadInfo],
     ) -> Option<EvasionTechnique> {
         // Detect timing-based anti-analysis techniques
-        Some(EvasionTechnique {
-            technique_name: "Timing Check Evasion".to_string(),
-            mitre_id: "T1497.003".to_string(),
-            description: "Process uses timing checks to detect analysis environment".to_string(),
-            confidence: 0.6,
-            indicators: vec![
-                "RDTSC instruction usage".to_string(),
-                "QueryPerformanceCounter calls".to_string(),
-            ],
-            severity: EvasionSeverity::High,
-        })
+        // Not implemented: this returned a hardcoded detection for every
+        // process, fabricating indicators that were never observed.
+        // Requires instruction-level tracing of RDTSC/QueryPerformanceCounter,
+        // which this scanner does not collect.
+        None
     }
 }
 
@@ -885,47 +873,25 @@ impl EnvironmentChecker {
     }
 
     fn detect_vm_evasion(&self, _process: &ProcessInfo) -> Option<EvasionTechnique> {
-        Some(EvasionTechnique {
-            technique_name: "Virtual Machine Detection".to_string(),
-            mitre_id: "T1497.001".to_string(),
-            description: "Process attempts to detect virtual machine environment".to_string(),
-            confidence: 0.8,
-            indicators: vec![
-                "VM artifact enumeration".to_string(),
-                "Hardware fingerprinting".to_string(),
-            ],
-            severity: EvasionSeverity::High,
-        })
+        // Not implemented: this returned a hardcoded detection for every
+        // process, fabricating indicators that were never observed.
+        // Requires observing the process query VM artifacts; not collected.
+        None
     }
 
     fn detect_debugger_evasion(&self, _process: &ProcessInfo) -> Option<EvasionTechnique> {
-        Some(EvasionTechnique {
-            technique_name: "Debugger Detection".to_string(),
-            mitre_id: "T1497.001".to_string(),
-            description: "Process implements anti-debugging techniques".to_string(),
-            confidence: 0.9,
-            indicators: vec![
-                "IsDebuggerPresent API calls".to_string(),
-                "PEB flag checks".to_string(),
-                "Exception handler manipulation".to_string(),
-            ],
-            severity: EvasionSeverity::High,
-        })
+        // Not implemented: this returned a hardcoded detection for every
+        // process, fabricating indicators that were never observed.
+        // Requires observing IsDebuggerPresent/PEB->BeingDebugged reads;
+        // not collected.
+        None
     }
 
     fn detect_sandbox_evasion(&self, _process: &ProcessInfo) -> Option<EvasionTechnique> {
-        Some(EvasionTechnique {
-            technique_name: "Sandbox Detection".to_string(),
-            mitre_id: "T1497.001".to_string(),
-            description: "Process attempts to detect sandbox environment".to_string(),
-            confidence: 0.7,
-            indicators: vec![
-                "Mouse movement monitoring".to_string(),
-                "User interaction detection".to_string(),
-                "System resource enumeration".to_string(),
-            ],
-            severity: EvasionSeverity::Medium,
-        })
+        // Not implemented: this returned a hardcoded detection for every
+        // process, fabricating indicators that were never observed.
+        // Requires observing user-interaction probing; not collected.
+        None
     }
 }
 
@@ -1015,18 +981,10 @@ impl ApiHookingDetector {
     }
 
     pub fn detect_api_evasion(&self, _process: &ProcessInfo) -> Option<EvasionTechnique> {
-        Some(EvasionTechnique {
-            technique_name: "API Hooking Evasion".to_string(),
-            mitre_id: "T1562.002".to_string(),
-            description: "Process modifies API hooks to evade detection".to_string(),
-            confidence: 0.8,
-            indicators: vec![
-                "Runtime API patching detected".to_string(),
-                "Import table modifications".to_string(),
-                "Direct syscall usage".to_string(),
-            ],
-            severity: EvasionSeverity::High,
-        })
+        // Not implemented: this returned a hardcoded detection for every
+        // process, fabricating indicators that were never observed.
+        // Superseded by the hook scanner, which inspects real prologues.
+        None
     }
 }
 
@@ -1062,18 +1020,11 @@ impl ExecutionFlowAnalyzer {
         _process: &ProcessInfo,
         _memory_regions: &[MemoryRegion],
     ) -> Option<EvasionTechnique> {
-        Some(EvasionTechnique {
-            technique_name: "Control Flow Hijacking".to_string(),
-            mitre_id: "T1055".to_string(),
-            description: "Process uses advanced control flow techniques".to_string(),
-            confidence: 0.9,
-            indicators: vec![
-                "ROP/JOP gadget chains detected".to_string(),
-                "Return address manipulation".to_string(),
-                "Control flow integrity bypassed".to_string(),
-            ],
-            severity: EvasionSeverity::Critical,
-        })
+        // Not implemented: this returned a hardcoded detection for every
+        // process, fabricating indicators that were never observed.
+        // Requires stack walking and disassembly to identify real ROP/JOP
+        // chains; neither is collected here.
+        None
     }
 }
 
@@ -1170,18 +1121,10 @@ impl ObfuscationDetector {
         _process: &ProcessInfo,
         _memory_regions: &[MemoryRegion],
     ) -> Option<EvasionTechnique> {
-        Some(EvasionTechnique {
-            technique_name: "Runtime Packing".to_string(),
-            mitre_id: "T1027.002".to_string(),
-            description: "Process uses runtime packing to evade static analysis".to_string(),
-            confidence: 0.7,
-            indicators: vec![
-                "High entropy sections detected".to_string(),
-                "Runtime unpacking behavior".to_string(),
-                "Modified PE headers".to_string(),
-            ],
-            severity: EvasionSeverity::Medium,
-        })
+        // Not implemented: this returned a hardcoded detection for every
+        // process, fabricating indicators that were never observed.
+        // Requires real section-entropy measurement; not collected.
+        None
     }
 
     fn detect_code_obfuscation(
@@ -1189,18 +1132,10 @@ impl ObfuscationDetector {
         _process: &ProcessInfo,
         _memory_regions: &[MemoryRegion],
     ) -> Option<EvasionTechnique> {
-        Some(EvasionTechnique {
-            technique_name: "Code Obfuscation".to_string(),
-            mitre_id: "T1027".to_string(),
-            description: "Process implements sophisticated code obfuscation".to_string(),
-            confidence: 0.8,
-            indicators: vec![
-                "Control flow obfuscation".to_string(),
-                "String encryption".to_string(),
-                "Polymorphic code".to_string(),
-            ],
-            severity: EvasionSeverity::High,
-        })
+        // Not implemented: this returned a hardcoded detection for every
+        // process, fabricating indicators that were never observed.
+        // Requires disassembly-based control-flow analysis; not collected.
+        None
     }
 }
 
