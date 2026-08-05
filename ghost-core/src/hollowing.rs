@@ -436,10 +436,7 @@ impl HollowingDetector {
         let mut indicators = Vec::new();
 
         // Get the path to the executable on disk
-        let disk_path = match &process.path {
-            Some(path) => path,
-            None => return None,
-        };
+        let disk_path = process.path.as_ref()?;
 
         // Read PE from disk
         let mut disk_file = match File::open(disk_path) {
