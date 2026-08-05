@@ -273,9 +273,14 @@ pub fn validate_pe_header(pid: u32, base_address: usize) -> anyhow::Result<PEHea
         return Ok(PEHeaderValidation::MismatchedImageBase);
     }
 
-    // Validate entry point (should be within the image)
+    // Validate entry point (should be within the image).
+    //
+    // A zero AddressOfEntryPoint is not suspicious: resource-only DLLs and
+    // plenty of ordinary DLLs have no entry point at all, so treating zero
+    // as an anomaly flagged legitimate modules. Only an entry point outside
+    // the image is genuinely malformed.
     let entry_point_rva = optional_header.address_of_entry_point;
-    if entry_point_rva == 0 || entry_point_rva >= optional_header.size_of_image {
+    if entry_point_rva >= optional_header.size_of_image {
         return Ok(PEHeaderValidation::SuspiciousEntryPoint);
     }
 

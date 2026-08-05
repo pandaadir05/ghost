@@ -169,15 +169,31 @@ impl DetectionEngine {
         let mut indicators = Vec::new();
         let mut confidence = 0.0;
 
-        // Check for RWX memory regions
+        // Check for RWX memory regions. Unbacked (MEM_PRIVATE) RWX is the
+        // meaningful case: image-backed RWX sections exist in some legitimate
+        // modules, while writable+executable private memory is where injected
+        // code lives. JIT runtimes also allocate it, so this is a moderate
+        // signal that needs corroboration - never a verdict on its own.
         let rwx_count = memory_regions
             .iter()
             .filter(|r| r.protection == MemoryProtection::ReadWriteExecute)
             .count();
+        let unbacked_rwx = memory_regions
+            .iter()
+            .filter(|r| {
+                r.protection == MemoryProtection::ReadWriteExecute && r.region_type == "PRIVATE"
+            })
+            .count();
 
-        if rwx_count > 0 {
-            indicators.push(format!("{} RWX memory regions detected", rwx_count));
-            confidence += 0.3;
+        if unbacked_rwx > 0 {
+            indicators.push(format!(
+                "{} unbacked RWX memory regions detected",
+                unbacked_rwx
+            ));
+            confidence += 0.35;
+        } else if rwx_count > 0 {
+            indicators.push(format!("{} image-backed RWX regions detected", rwx_count));
+            confidence += 0.1;
         }
 
         // Check for private executable memory
@@ -218,7 +234,12 @@ impl DetectionEngine {
 
         // Analyze threads if provided
         if let Some(thread_list) = threads {
-            self.analyze_threads(thread_list, memory_regions, &mut indicators, &mut confidence);
+            self.analyze_threads(
+                thread_list,
+                memory_regions,
+                &mut indicators,
+                &mut confidence,
+            );
         }
 
         // Check for Windows hook injection
@@ -260,6 +281,9 @@ impl DetectionEngine {
 
             let mut shellcode_score = 0.0f32;
             for (sig, (count, first_addr, conf)) in &by_signature {
+                if *count < Self::min_occurrences_for(sig) {
+                    continue;
+                }
                 indicators.push(format!(
                     "Shellcode signature '{}' matched {}x (first at {:#x})",
                     sig, count, first_addr
@@ -403,7 +427,7 @@ impl DetectionEngine {
 
         let threat_level = if confidence >= 0.7 && strong_signals >= 1 {
             ThreatLevel::Malicious
-        } else if confidence >= 0.5 || strong_signals >= 1 {
+        } else if confidence >= 0.3 || strong_signals >= 1 {
             ThreatLevel::Suspicious
         } else {
             ThreatLevel::Clean
@@ -590,7 +614,9 @@ impl DetectionEngine {
     ) {
         let unbacked_start_threads = threads
             .iter()
-            .filter(|t| t.start_address != 0 && Self::is_unbacked_executable(regions, t.start_address))
+            .filter(|t| {
+                t.start_address != 0 && Self::is_unbacked_executable(regions, t.start_address)
+            })
             .count();
 
         if unbacked_start_threads > 0 {
@@ -648,6 +674,22 @@ impl DetectionEngine {
         None
     }
 
+    /// How many times a signature must appear in one process before it is
+    /// worth reporting.
+    ///
+    /// Some byte sequences are individually ordinary and only become
+    /// meaningful in bulk. A single `mov r10,rcx ; mov eax,imm32` is the
+    /// prologue of every ntdll stub and shows up in copied thunks and JIT
+    /// output; a *table* of them in private memory is a generated syscall
+    /// stub set, which is the thing worth flagging.
+    fn min_occurrences_for(signature: &str) -> usize {
+        match signature {
+            "Direct Syscall Setup (x64)" => 3,
+            "NOP Sled" => 2,
+            _ => 1,
+        }
+    }
+
     /// Indicators that carry a low base rate on clean systems, and so are
     /// allowed to promote a process to a malicious verdict. Everything else
     /// is corroborating context only.
@@ -655,10 +697,26 @@ impl DetectionEngine {
         // These must match the indicator text produced above verbatim.
         const STRONG: &[&str] = &[
             "thread(s) starting in unbacked executable memory",
-            "Shellcode signature",
             "suspicious Windows hooks detected",
             "Main executable image appears unmapped",
         ];
+
+        // Only high-specificity shellcode signatures may promote a verdict.
+        // Generic ones (syscall prologues, NOP runs, stack setup) describe
+        // shapes that ordinary code also has.
+        const STRONG_SIGNATURES: &[&str] = &[
+            "Metasploit",
+            "Shikata Ga Nai",
+            "ROR13",
+            "Egg Hunter",
+            "Cobalt",
+            "Reflective",
+        ];
+
+        if indicator.starts_with("Shellcode signature") {
+            return STRONG_SIGNATURES.iter().any(|s| indicator.contains(s));
+        }
+
         STRONG.iter().any(|s| indicator.contains(s))
     }
 

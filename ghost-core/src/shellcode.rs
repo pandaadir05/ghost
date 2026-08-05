@@ -128,13 +128,10 @@ impl ShellcodeDetector {
             confidence: 0.98,
         });
 
-        // Common x64 shellcode prologue
-        self.signatures.push(ShellcodeSignature {
-            pattern: vec![0x48, 0x83, 0xEC, 0x28, 0x48, 0x83, 0xE4, 0xF0], // sub rsp, 0x28; and rsp, -16
-            mask: vec![0xFF, 0xFF, 0xFF, 0x00, 0xFF, 0xFF, 0xFF, 0xFF],
-            name: "x64 Stack Setup Pattern",
-            confidence: 0.7,
-        });
+        // REMOVED: "x64 Stack Setup Pattern" ({ 48 83 EC 28 48 83 E4 F0 }).
+        // "sub rsp,0x28 ; and rsp,-16" is the stack setup MSVC emits for
+        // ordinary functions, so it matched throughout every JIT-generated
+        // region at confidence 0.7.
 
         // ===== Position-Independent Code Patterns =====
 
@@ -263,13 +260,10 @@ impl ShellcodeDetector {
             confidence: 0.6,
         });
 
-        // PUSH/RET technique (for control flow hijacking)
-        self.signatures.push(ShellcodeSignature {
-            pattern: vec![0x68], // push imm32
-            mask: vec![0xFF],
-            name: "PUSH/RET Control Flow",
-            confidence: 0.3, // Low confidence as standalone
-        });
+        // REMOVED: "PUSH/RET Control Flow".
+        // Its pattern was the single byte 0x68 ("push imm32"), which occurs
+        // constantly in any compiled code - it cannot function as a
+        // standalone signature at any confidence.
 
         // ===== Process Hollowing/Injection Indicators =====
 

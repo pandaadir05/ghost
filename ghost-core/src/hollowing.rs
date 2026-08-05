@@ -197,9 +197,18 @@ impl HollowingDetector {
             .filter(|r| r.region_type == "IMAGE")
             .collect();
 
-        // Typical legitimate process should have at least one IMAGE region for the main executable
+        // A legitimate process always maps its main executable as MEM_IMAGE,
+        // so the absence of any IMAGE region is a genuine hollowing signal -
+        // but only when the region list is actually complete. Enumeration
+        // returns few or no regions for protected processes and for targets
+        // we lack rights to read, and absence of evidence there is not
+        // evidence of hollowing.
+        const MIN_REGIONS_FOR_CONFIDENT_VERDICT: usize = 16;
         if main_image_regions.is_empty() {
-            return Some(HollowingIndicator::UnmappedMainImage);
+            if regions.len() >= MIN_REGIONS_FOR_CONFIDENT_VERDICT {
+                return Some(HollowingIndicator::UnmappedMainImage);
+            }
+            return None;
         }
 
         // NOTE: a numeric image-base range check used to live here, testing

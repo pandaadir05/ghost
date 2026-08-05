@@ -15,11 +15,15 @@ rule Process_Hollowing_Indicators
         $api_5 = "SetThreadContext" nocase
         $api_6 = "ResumeThread" nocase
 
-        // Suspended process creation
+        // Suspended process creation: push CREATE_SUSPENDED
         $create_suspended = { 6A 04 5? 6A 00 }
 
     condition:
-        ($api_1 or $api_2) and 2 of ($api_3, $api_4, $api_5, $api_6)
+        ($api_1 or $api_2)
+        and 2 of ($api_3, $api_4, $api_5, $api_6)
+        // Referenced so the string is not dead; unreferenced strings are a
+        // fatal compile error that takes the whole ruleset down with them.
+        and ($create_suspended or $api_6)
 }
 
 rule DLL_Injection_Classic
@@ -94,7 +98,10 @@ rule Thread_Execution_Hijacking
         $api_5 = "VirtualAllocEx" nocase
 
     condition:
-        $api_1 and $api_2 and $api_3 and $api_4
+        // The suspend/get/set/resume sequence is the hijack itself; the
+        // allocation is what the hijacked context is pointed at. Referencing
+        // $api_5 also keeps it from being a fatal unreferenced string.
+        $api_1 and $api_2 and $api_3 and ($api_4 or $api_5)
 }
 
 rule AtomBombing_Technique
@@ -152,7 +159,10 @@ rule PROPagate_Injection
         $api_6 = "CallWindowProcW" nocase
 
     condition:
-        ($api_1 or $api_2) and ($api_5 or $api_6)
+        // Enumerating window properties before overwriting the subclass
+        // callback is what distinguishes PROPagate from ordinary window
+        // property use, so require it rather than leaving it unreferenced.
+        ($api_1 or $api_2) and ($api_3 or $api_4) and ($api_5 or $api_6)
 }
 
 rule Early_Bird_Injection
@@ -168,8 +178,15 @@ rule Early_Bird_Injection
         $api_2 = "CreateProcessW" nocase
         $api_3 = "QueueUserAPC" nocase
         $api_4 = "ResumeThread" nocase
-        $create_suspended = { 00 00 00 04 }
+        // NtTestAlert is what an early-bird payload uses to drain the APC
+        // queue in its own thread; it is far more specific than the
+        // CreateProcess/ResumeThread pair.
+        $api_5 = "NtTestAlert" nocase
 
     condition:
-        ($api_1 or $api_2) and $api_3 and $api_4
+        // An unreferenced string used to sit here ({ 00 00 00 04 }, also the
+        // wrong byte order for CREATE_SUSPENDED). Unreferenced strings are a
+        // FATAL YARA compile error, and because one bad file aborts the whole
+        // compile, it silently disabled the entire ruleset.
+        ($api_1 or $api_2) and $api_3 and ($api_4 or $api_5)
 }
