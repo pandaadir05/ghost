@@ -720,9 +720,15 @@ impl DetectionEngine {
     /// is corroborating context only.
     fn is_strong_indicator(indicator: &str) -> bool {
         // These must match the indicator text produced above verbatim.
+        //
+        // Hook findings are deliberately NOT here. Inline hook detection was
+        // dead until recently (a dangling pointer made the lookup fail), so
+        // its output has not been through a false-positive pass yet, and
+        // browsers, overlays and anti-cheat all hook legitimately. It still
+        // contributes confidence and is reported, but it does not by itself
+        // promote a process to a malicious verdict.
         const STRONG: &[&str] = &[
             "thread(s) starting in unbacked executable memory",
-            "suspicious Windows hooks detected",
             "Main executable image appears unmapped",
         ];
 

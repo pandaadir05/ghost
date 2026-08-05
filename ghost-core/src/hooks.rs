@@ -192,6 +192,26 @@ mod platform {
             let module_count =
                 (cb_needed as usize) / std::mem::size_of::<windows::Win32::Foundation::HMODULE>();
 
+            // Address ranges of every mapped image, used to tell an injected
+            // trampoline from a legitimate one living inside a hooking DLL.
+            let image_ranges: Vec<(usize, usize)> =
+                crate::memory::enumerate_memory_regions(target_pid)
+                    .map(|regions| {
+                        regions
+                            .into_iter()
+                            .filter(|r| r.region_type == "IMAGE")
+                            .map(|r| (r.base_address, r.base_address.saturating_add(r.size)))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+
+            // Without a region map every destination looks unbacked, which
+            // would report a hook on each forwarded export.
+            if image_ranges.is_empty() {
+                let _ = CloseHandle(handle);
+                return Ok(hooks);
+            }
+
             // Check each critical API for hooks
             for (module_name, func_name) in CRITICAL_APIS {
                 // Find the module in target process
@@ -281,16 +301,28 @@ mod platform {
                     .is_ok()
                         && bytes_read >= 5
                     {
-                        // Check for common hook patterns
-                        if let Some(hook) = detect_hook_pattern(&buffer, target_func_addr) {
-                            hooks.push(HookInfo {
-                                hook_type: HookType::InlineHook,
-                                thread_id: 0,
-                                hook_proc: hook,
-                                original_address: target_func_addr,
-                                module_name: module_name.to_string(),
-                                hooked_function: func_name.to_string(),
-                            });
+                        // Check for common hook patterns.
+                        //
+                        // A prologue jump is only interesting when it leaves
+                        // every mapped image. Legitimate software hooks APIs
+                        // constantly - Steam and other overlays, browsers,
+                        // anti-cheat, profilers - and those trampolines live
+                        // in the hooking DLL, which is itself image-backed.
+                        // A jump into unbacked memory is the injected case.
+                        if let Some(destination) = detect_hook_pattern(&buffer, target_func_addr) {
+                            let backed = image_ranges
+                                .iter()
+                                .any(|&(start, end)| destination >= start && destination < end);
+                            if !backed {
+                                hooks.push(HookInfo {
+                                    hook_type: HookType::InlineHook,
+                                    thread_id: 0,
+                                    hook_proc: destination,
+                                    original_address: target_func_addr,
+                                    module_name: module_name.to_string(),
+                                    hooked_function: func_name.to_string(),
+                                });
+                            }
                         }
                     }
                 }
@@ -315,10 +347,18 @@ mod platform {
             return Some(target);
         }
 
-        // JMP [rip+disp32] (FF 25 xx xx xx xx) - 64-bit
+        // JMP [rip+disp32] (FF 25 xx xx xx xx) - 64-bit indirect jump.
+        //
+        // This is NOT reported as a hook. It is how Windows compiles export
+        // forwarder thunks: on Windows 8+ many kernel32 entries (including
+        // CreateRemoteThread, LoadLibraryA/W, VirtualAllocEx and
+        // WriteProcessMemory - all of them in CRITICAL_APIS) are forwarders
+        // into kernelbase and begin with exactly these bytes. Treating them
+        // as hooks flagged every process on the machine. Resolving the real
+        // destination needs a second read through the pointer, which the
+        // caller does when it has a handle.
         if bytes.len() >= 6 && bytes[0] == 0xFF && bytes[1] == 0x25 {
-            // This is an indirect jump, would need to read the target address
-            return Some(0xFFFFFFFF); // Indicate hook detected but target unknown
+            return None;
         }
 
         // MOV RAX, imm64; JMP RAX (48 B8 ... FF E0)
