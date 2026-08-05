@@ -7,8 +7,6 @@
 //! - Function address resolution
 use crate::{GhostError, Result};
 use serde::{Deserialize, Serialize};
-#[cfg(windows)]
-use std::collections::HashMap;
 
 /// PE data directory indices
 pub const IMAGE_DIRECTORY_ENTRY_EXPORT: usize = 0;
@@ -232,43 +230,44 @@ pub fn detect_iat_hooks(
     // Parse IAT from process memory
     let mut memory_imports = parse_iat_from_memory(pid, base_address, &memory_reader)?;
 
-    // Parse IAT from disk file
-    let disk_imports = parse_iat_from_disk(disk_path)?;
-
-    // Create lookup map for disk imports
-    let disk_map: HashMap<String, usize> = disk_imports
-        .iter()
-        .filter_map(|imp| {
-            imp.function_name.as_ref().map(|name| {
-                (
-                    format!("{}!{}", imp.dll_name.to_lowercase(), name.to_lowercase()),
-                    imp.current_address,
-                )
-            })
+    // The IAT slots in the file on disk hold RVAs into the hint/name table,
+    // while the same slots at runtime hold resolved function addresses, so
+    // comparing the two can never identify a hook. What does identify one is
+    // where the resolved address points: a legitimately bound import targets
+    // an exporting module's mapped image, whereas a hook redirects the slot
+    // into a trampoline allocated outside any image.
+    let image_ranges: Vec<(usize, usize)> = crate::memory::enumerate_memory_regions(pid)
+        .map(|regions| {
+            regions
+                .into_iter()
+                .filter(|r| r.region_type == "IMAGE")
+                .map(|r| (r.base_address, r.base_address.saturating_add(r.size)))
+                .collect()
         })
-        .collect();
+        .unwrap_or_default();
 
     let mut hooked_count = 0;
 
-    // Compare each memory import with disk version
-    for import in &mut memory_imports {
-        if let Some(func_name) = &import.function_name {
-            let key = format!(
-                "{}!{}",
-                import.dll_name.to_lowercase(),
-                func_name.to_lowercase()
-            );
-
-            if let Some(&disk_addr) = disk_map.get(&key) {
-                // Check if addresses differ significantly (not just ASLR offset)
-                // Real hooks will point to completely different modules
-                if !addresses_match_with_aslr(import.current_address, disk_addr) {
-                    import.is_hooked = true;
-                    hooked_count += 1;
-                }
+    // Without a region map we cannot tell backed from unbacked memory, and
+    // guessing would mean reporting hooks we did not observe.
+    if !image_ranges.is_empty() {
+        for import in &mut memory_imports {
+            if import.current_address == 0 {
+                continue;
+            }
+            let backed = image_ranges.iter().any(|&(start, end)| {
+                import.current_address >= start && import.current_address < end
+            });
+            if !backed {
+                import.is_hooked = true;
+                hooked_count += 1;
             }
         }
     }
+
+    // `disk_path` is retained for the caller's module-identification logic and
+    // for future on-disk comparison of the export itself.
+    let _ = disk_path;
 
     let total = memory_imports.len();
     let hook_percentage = if total > 0 {
@@ -284,8 +283,14 @@ pub fn detect_iat_hooks(
     })
 }
 
-/// Parse IAT from disk file
+/// Parse IAT from disk file.
+///
+/// Retained for the on-disk export comparison noted in `detect_iat_hooks`.
+/// The runtime-vs-disk IAT comparison it was originally written for cannot
+/// identify hooks, because disk IAT slots hold RVAs into the hint/name table
+/// rather than resolved function addresses.
 #[cfg(windows)]
+#[allow(dead_code)]
 fn parse_iat_from_disk(file_path: &str) -> Result<Vec<ImportEntry>> {
     use std::fs::File;
     use std::io::Read;
@@ -305,6 +310,7 @@ fn parse_iat_from_disk(file_path: &str) -> Result<Vec<ImportEntry>> {
 
 /// Parse IAT from memory buffer
 #[cfg(windows)]
+#[allow(dead_code)]
 fn parse_iat_from_buffer(buffer: &[u8]) -> Result<Vec<ImportEntry>> {
     let reader = |_pid: u32, offset: usize, size: usize| -> Result<Vec<u8>> {
         if offset + size > buffer.len() {
@@ -318,14 +324,13 @@ fn parse_iat_from_buffer(buffer: &[u8]) -> Result<Vec<ImportEntry>> {
     parse_iat_from_memory(0, 0, reader)
 }
 
-/// Helper to check if two addresses match considering ASLR
-#[allow(dead_code)]
-fn addresses_match_with_aslr(addr1: usize, addr2: usize) -> bool {
-    // Simple heuristic: if addresses are in completely different ranges (different modules)
-    // they don't match. This is a simplified check.
-    let high_mask = 0xFFFF000000000000usize;
-    (addr1 & high_mask) == (addr2 & high_mask)
-}
+// REMOVED: addresses_match_with_aslr.
+//
+// It compared `addr & 0xFFFF_0000_0000_0000` for both operands, but bits
+// 48-63 are zero for every x64 user-mode address, so it returned true
+// unconditionally and IAT hook detection never fired. Hook identification is
+// now done by checking whether a resolved import points into a mapped image,
+// which is a property that can actually be observed.
 
 // Helper functions for reading PE structures
 

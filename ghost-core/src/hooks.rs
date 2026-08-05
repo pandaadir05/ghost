@@ -238,19 +238,33 @@ mod platform {
                         Err(_) => continue,
                     };
 
+                    // The CString must outlive the call: binding it inside the
+                    // argument expression dropped it before GetProcAddress ran,
+                    // leaving a dangling pointer.
+                    let func_name_c = match std::ffi::CString::new(*func_name) {
+                        Ok(cstring) => cstring,
+                        Err(_) => continue,
+                    };
+
                     let func_addr = match GetProcAddress(
                         local_module,
-                        windows::core::PCSTR::from_raw(match std::ffi::CString::new(*func_name) {
-                            Ok(cstring) => cstring.as_bytes_with_nul().as_ptr(),
-                            Err(_) => continue,
-                        }),
+                        windows::core::PCSTR::from_raw(func_name_c.as_bytes_with_nul().as_ptr()),
                     ) {
                         Some(addr) => addr as usize,
                         None => continue,
                     };
 
-                    // Calculate offset from module base
-                    let offset = func_addr - local_module.0 as usize;
+                    // Calculate offset from module base.
+                    //
+                    // A forwarded export (many kernel32 entries forward into
+                    // kernelbase) resolves outside this module, so the
+                    // subtraction would wrap. Skip those rather than compute a
+                    // nonsense target address in the remote process.
+                    let local_base = local_module.0 as usize;
+                    let offset = match func_addr.checked_sub(local_base) {
+                        Some(offset) if offset < mod_info.SizeOfImage as usize => offset,
+                        _ => continue,
+                    };
                     let target_func_addr = mod_info.lpBaseOfDll as usize + offset;
 
                     // Read first bytes of function in target process
