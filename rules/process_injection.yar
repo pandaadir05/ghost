@@ -48,18 +48,31 @@ rule DLL_Injection_Classic
 rule Reflective_DLL_Injection
 {
     meta:
-        description = "Detects reflective DLL injection patterns"
+        description = "Detects reflective DLL loading (manual PE mapping)"
         author = "Ghost Detection Engine"
-        threat_level = "critical"
-        mitre_attack = "T1055.001"
+        date = "2026-08-05"
+        threat_level = "high"
+        // T1620 is the technique for loading code without the OS loader;
+        // T1055.001 describes injecting into another process, which is a
+        // different (and often unrelated) step.
+        mitre_attack = "T1620"
+        scan_context = "memory_region"
 
     strings:
-        $reflective_1 = "ReflectiveLoader" nocase
-        $reflective_2 = { 48 89 5C 24 08 48 89 74 24 10 57 48 83 EC 20 49 8B F8 }
-        $reflective_3 = { 4D 5A 90 00 03 00 00 00 04 00 00 00 FF FF 00 00 }
-        $custom_loader = { 8B 45 3C 8B 54 05 78 03 D5 8B 4A 20 }
+        $loader_export = "ReflectiveLoader" nocase
+
+        // Manual PE header walk: e_lfanew -> section table -> AddressOfNames.
+        // This is the loader logic itself, not an artefact of being a PE.
+        $header_walk_x86 = { 8B 45 3C 8B 54 05 78 03 D5 8B 4A 20 }
+        $header_walk_x64 = { 48 63 ?? 3C 48 03 ?? 8B ?? 88 00 00 00 }
 
     condition:
+        // Two strings were removed here. One was { 4D 5A 90 00 03 00 ... },
+        // the stock DOS header emitted by every Windows PE ever built, and
+        // the other was a generic MSVC x64 prologue. With "any of them" and
+        // critical severity, this rule fired on essentially every module in
+        // every process. A PE image in unbacked memory is the real signal
+        // and belongs in the engine, which knows a region's backing type.
         any of them
 }
 
