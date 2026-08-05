@@ -67,7 +67,7 @@ pub struct DetectionEngine {
     evasion_detector: EvasionDetector,
     mitre_engine: MitreAttackEngine,
     yara_engine: Option<DynamicYaraEngine>,
-    _config: Option<DetectionConfig>,
+    config: DetectionConfig,
     #[cfg(all(target_os = "linux", feature = "ebpf-detection"))]
     ebpf_detector: Option<EbpfDetector>,
 }
@@ -153,7 +153,7 @@ impl DetectionEngine {
             evasion_detector,
             mitre_engine,
             yara_engine,
-            _config: config,
+            config: config.unwrap_or_default(),
             #[cfg(all(target_os = "linux", feature = "ebpf-detection"))]
             ebpf_detector,
         })
@@ -233,28 +233,33 @@ impl DetectionEngine {
         self.check_memory_patterns(memory_regions, &mut indicators, &mut confidence);
 
         // Analyze threads if provided
-        if let Some(thread_list) = threads {
-            self.analyze_threads(
-                thread_list,
-                memory_regions,
-                &mut indicators,
-                &mut confidence,
-            );
+        if self.config.thread_analysis_enabled {
+            if let Some(thread_list) = threads {
+                self.analyze_threads(
+                    thread_list,
+                    memory_regions,
+                    &mut indicators,
+                    &mut confidence,
+                );
+            }
         }
 
         // Check for Windows hook injection
-        if let Ok(hook_result) = detect_hook_injection(process.pid) {
-            if hook_result.suspicious_count > 0 {
-                indicators.push(format!(
-                    "{} suspicious Windows hooks detected",
-                    hook_result.suspicious_count
-                ));
-                confidence += 0.6; // High confidence for hook-based injection
-            }
+        if self.config.hook_detection {
+            if let Ok(hook_result) = detect_hook_injection(process.pid) {
+                if hook_result.suspicious_count > 0 {
+                    indicators.push(format!(
+                        "{} suspicious Windows hooks detected",
+                        hook_result.suspicious_count
+                    ));
+                    confidence += 0.6; // High confidence for hook-based injection
+                }
 
-            if hook_result.global_hooks > 8 {
-                indicators.push("Excessive global hooks (possible system compromise)".to_string());
-                confidence += 0.3;
+                if hook_result.global_hooks > 8 {
+                    indicators
+                        .push("Excessive global hooks (possible system compromise)".to_string());
+                    confidence += 0.3;
+                }
             }
         }
 
@@ -263,7 +268,11 @@ impl DetectionEngine {
         // contain hundreds of hits for one pattern, and scoring each
         // occurrence separately was the source of both the 100+ indicator
         // lists and the runaway confidence.
-        let shellcode_detections = self.scan_for_shellcode(process.pid, memory_regions);
+        let shellcode_detections = if self.config.shellcode_detection {
+            self.scan_for_shellcode(process.pid, memory_regions)
+        } else {
+            Vec::new()
+        };
         if !shellcode_detections.is_empty() {
             let mut by_signature: std::collections::BTreeMap<String, (usize, usize, f32)> =
                 std::collections::BTreeMap::new();
@@ -300,14 +309,16 @@ impl DetectionEngine {
         }
 
         // Check for process hollowing
-        if let Ok(Some(hollowing_detection)) = self
-            .hollowing_detector
-            .analyze_process(process, memory_regions)
-        {
-            for indicator in &hollowing_detection.indicators {
-                indicators.push(format!("Process hollowing: {}", indicator));
+        if self.config.hollowing_detection {
+            if let Ok(Some(hollowing_detection)) = self
+                .hollowing_detector
+                .analyze_process(process, memory_regions)
+            {
+                for indicator in &hollowing_detection.indicators {
+                    indicators.push(format!("Process hollowing: {}", indicator));
+                }
+                confidence += hollowing_detection.confidence;
             }
-            confidence += hollowing_detection.confidence;
         }
 
         // YARA rule scanning
@@ -430,9 +441,18 @@ impl DetectionEngine {
             .filter(|i| Self::is_strong_indicator(i))
             .count();
 
-        let threat_level = if confidence >= 0.7 && strong_signals >= 1 {
+        // `confidence_threshold` is the configured bar for calling something
+        // suspicious; a malicious verdict sits well above it and additionally
+        // requires corroboration.
+        // Never let the malicious bar fall below 0.7 - a lower suspicious
+        // threshold should surface more for triage, not hand out more
+        // malicious verdicts.
+        let suspicious_at = self.config.confidence_threshold.clamp(0.05, 0.95);
+        let malicious_at = (suspicious_at * 2.0).clamp(0.7, 0.95);
+
+        let threat_level = if confidence >= malicious_at && strong_signals >= 1 {
             ThreatLevel::Malicious
-        } else if confidence >= 0.3 || strong_signals >= 1 {
+        } else if confidence >= suspicious_at || strong_signals >= 1 {
             ThreatLevel::Suspicious
         } else {
             ThreatLevel::Clean

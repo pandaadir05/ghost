@@ -38,6 +38,61 @@ mod tests {
         assert!(result.indicators[0].contains("RWX"));
     }
 
+    /// `DetectionConfig` used to be stored in a field named `_config` and
+    /// never read, so every toggle a user set was silently ignored.
+    #[test]
+    fn test_detector_toggles_are_honored() {
+        let process = create_test_process();
+        let regions = small_private_exec_regions(12);
+
+        let disabled = DetectionConfig {
+            shellcode_detection: false,
+            hollowing_detection: false,
+            hook_detection: false,
+            thread_analysis_enabled: false,
+            ..Default::default()
+        };
+        let mut engine =
+            DetectionEngine::with_config(Some(disabled)).expect("Failed to create engine");
+        let result = engine.analyze_process(&process, &regions, None);
+
+        assert!(
+            !result
+                .indicators
+                .iter()
+                .any(|i| i.contains("Process hollowing") || i.contains("Shellcode signature")),
+            "disabled detectors must not contribute indicators, got: {:?}",
+            result.indicators
+        );
+    }
+
+    /// A stricter confidence threshold must not make verdicts harsher.
+    #[test]
+    fn test_lower_threshold_does_not_create_malicious_verdicts() {
+        let process = create_test_process();
+        let mut regions = vec![MemoryRegion {
+            base_address: 0x7FF6_0000_0000,
+            size: 0x10_0000,
+            protection: MemoryProtection::ReadExecute,
+            region_type: "IMAGE".to_string(),
+        }];
+        regions.extend(small_private_exec_regions(12));
+
+        let sensitive = DetectionConfig {
+            confidence_threshold: 0.05,
+            ..Default::default()
+        };
+        let mut engine =
+            DetectionEngine::with_config(Some(sensitive)).expect("Failed to create engine");
+        let result = engine.analyze_process(&process, &regions, None);
+
+        assert_ne!(
+            result.threat_level,
+            ThreatLevel::Malicious,
+            "a lower threshold should surface more for triage, not promote to Malicious"
+        );
+    }
+
     /// Regression guard for the false-positive flood.
     ///
     /// A clean-system scan once returned 187 of ~330 processes as Malicious
