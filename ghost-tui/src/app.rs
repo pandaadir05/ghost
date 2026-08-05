@@ -8,7 +8,7 @@
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use ghost_core::{
-    memory, process, thread, DetectionEngine, IndicatorOfCompromise, ProcessInfo, ThreatContext,
+    memory, thread, DetectionEngine, IndicatorOfCompromise, ProcessInfo, ThreatContext,
     ThreatIntelligence, ThreatLevel,
 };
 use ratatui::widgets::{ListState, TableState};
@@ -97,16 +97,18 @@ pub struct MemoryStats {
     pub total_committed_mb: f64,
 }
 
-/// Result of a full system scan, produced without holding the shared app state.
+/// Analysis result for a single process, produced without holding the
+/// shared app state. `None` detection means the process came back clean.
 #[derive(Debug)]
-pub struct ScanOutcome {
-    pub processes: Vec<ProcessInfo>,
-    pub detections: Vec<DetectionEvent>,
-    pub suspicious_count: usize,
-    pub malicious_count: usize,
-    pub detection_count: usize,
-    pub scan_time_ms: u64,
-    pub memory_stats: MemoryStats,
+pub struct ProcessScanData {
+    pub detection: Option<DetectionEvent>,
+    pub threat_level: ThreatLevel,
+    pub total_regions: usize,
+    pub rwx_regions: usize,
+    pub private_regions: usize,
+    pub suspicious_allocations: usize,
+    pub largest_region_bytes: u64,
+    pub committed_bytes: u64,
 }
 
 #[derive(Debug)]
@@ -120,6 +122,8 @@ pub struct App {
     pub memory_stats: MemoryStats,
     pub threat_intel_data: ThreatIntelData,
     pub last_scan: Option<Instant>,
+    /// `(scanned, total)` while a scan is in progress.
+    pub scan_progress: Option<(usize, usize)>,
 
     // UI state
     pub processes_state: TableState,
@@ -174,6 +178,7 @@ impl App {
                 threat_feed_status: Vec::new(),
             },
             last_scan: None,
+            scan_progress: None,
             processes_state: TableState::default(),
             detections_state: ListState::default(),
             logs_state: ListState::default(),
@@ -198,130 +203,133 @@ impl App {
         Ok(app)
     }
 
-    /// Performs a full system scan for process injection indicators.
-    ///
-    /// This enumerates all running processes and analyzes their memory
-    /// regions and threads. It deliberately takes the detection engine
-    /// instead of `&mut self` so the scan can run without holding the
-    /// shared app state - locking the app for the duration of a scan
-    /// blanks the UI and drops input. Apply the result with
-    /// [`App::apply_scan`], which only needs the lock briefly.
-    pub fn perform_scan(engine: &mut DetectionEngine) -> Result<ScanOutcome> {
-        let scan_start = Instant::now();
-
-        let processes = process::enumerate_processes()
-            .map_err(|e| anyhow::anyhow!("Process enumeration failed: {}", e))?;
-
-        let mut detections = Vec::new();
-        let mut detection_count = 0;
-        let mut suspicious_count = 0;
-        let mut malicious_count = 0;
-
-        // Memory stats tracking
-        let mut total_regions = 0usize;
-        let mut rwx_regions = 0usize;
-        let mut private_regions = 0usize;
-        let mut suspicious_allocations = 0usize;
-        let mut largest_region: u64 = 0;
-        let mut total_committed: u64 = 0;
-
-        for proc in &processes {
-            if Self::should_skip_process(proc) {
-                continue;
-            }
-
-            let regions = match memory::enumerate_memory_regions(proc.pid) {
-                Ok(r) => r,
-                Err(_) => continue,
-            };
-
-            // Collect memory statistics
-            for region in &regions {
-                total_regions += 1;
-                total_committed += region.size as u64;
-                if region.size as u64 > largest_region {
-                    largest_region = region.size as u64;
-                }
-
-                // Check for RWX (read-write-execute) - suspicious
-                if region.protection.is_readable()
-                    && region.protection.is_writable()
-                    && region.protection.is_executable()
-                {
-                    rwx_regions += 1;
-                    suspicious_allocations += 1;
-                }
-
-                // Private vs shared - check region type
-                if region.region_type.contains("PRIVATE") || region.region_type.contains("private")
-                {
-                    private_regions += 1;
-                }
-            }
-
-            let threads = thread::enumerate_threads(proc.pid).ok();
-            let result = engine.analyze_process(proc, &regions, threads.as_deref());
-
-            match result.threat_level {
-                ThreatLevel::Suspicious => suspicious_count += 1,
-                ThreatLevel::Malicious => malicious_count += 1,
-                ThreatLevel::Clean => {}
-            }
-
-            if result.threat_level != ThreatLevel::Clean {
-                detection_count += 1;
-                detections.push(DetectionEvent {
-                    timestamp: Utc::now(),
-                    process: proc.clone(),
-                    threat_level: result.threat_level,
-                    indicators: result.indicators,
-                    confidence: result.confidence,
-                    threat_context: result.threat_context,
-                });
-            }
-        }
-
-        Ok(ScanOutcome {
-            processes,
-            detections,
-            suspicious_count,
-            malicious_count,
-            detection_count,
-            scan_time_ms: scan_start.elapsed().as_millis() as u64,
-            memory_stats: MemoryStats {
-                total_regions,
-                rwx_regions,
-                private_regions,
-                shared_regions: total_regions.saturating_sub(private_regions),
-                suspicious_allocations,
-                largest_region_mb: largest_region as f64 / 1024.0 / 1024.0,
-                total_committed_mb: total_committed as f64 / 1024.0 / 1024.0,
-            },
-        })
+    /// Starts a new scan pass: publishes the process list immediately and
+    /// resets the per-scan counters so results can stream in as each
+    /// process is analyzed. Cheap - safe to call under the shared lock.
+    pub fn begin_scan(&mut self, processes: Vec<ProcessInfo>) {
+        self.stats.total_processes = processes.len();
+        self.stats.suspicious_processes = 0;
+        self.stats.malicious_processes = 0;
+        self.memory_stats = MemoryStats::default();
+        self.scan_progress = Some((0, processes.len()));
+        self.add_log_message(format!("Scanning {} processes...", processes.len()));
+        self.processes = processes;
     }
 
-    /// Applies a completed scan to the app state. Cheap - safe to call
-    /// while holding the shared lock.
-    pub fn apply_scan(&mut self, outcome: ScanOutcome) {
-        self.processes = outcome.processes;
-        for detection in outcome.detections {
-            self.add_detection(detection);
+    /// Analyzes a single process. This is the expensive part of a scan and
+    /// deliberately takes the detection engine instead of `&mut self` so it
+    /// runs without holding the shared app state - locking the app for a
+    /// whole scan pass blanks the UI and drops input. Feed the result to
+    /// [`App::record_scan_result`] under a brief lock.
+    ///
+    /// Returns `None` for processes that are skipped or inaccessible.
+    pub fn scan_process(
+        engine: &mut DetectionEngine,
+        proc: &ProcessInfo,
+    ) -> Option<ProcessScanData> {
+        if Self::should_skip_process(proc) {
+            return None;
         }
-        self.memory_stats = outcome.memory_stats;
-        self.stats = SystemStats {
-            total_processes: self.processes.len(),
-            suspicious_processes: outcome.suspicious_count,
-            malicious_processes: outcome.malicious_count,
-            total_detections: self.detections.len(),
-            scan_time_ms: outcome.scan_time_ms,
-            memory_usage_mb: self.estimate_memory_usage(),
+
+        let regions = memory::enumerate_memory_regions(proc.pid).ok()?;
+
+        let mut data = ProcessScanData {
+            detection: None,
+            threat_level: ThreatLevel::Clean,
+            total_regions: 0,
+            rwx_regions: 0,
+            private_regions: 0,
+            suspicious_allocations: 0,
+            largest_region_bytes: 0,
+            committed_bytes: 0,
         };
+
+        // Collect memory statistics
+        for region in &regions {
+            data.total_regions += 1;
+            data.committed_bytes += region.size as u64;
+            if region.size as u64 > data.largest_region_bytes {
+                data.largest_region_bytes = region.size as u64;
+            }
+
+            // Check for RWX (read-write-execute) - suspicious
+            if region.protection.is_readable()
+                && region.protection.is_writable()
+                && region.protection.is_executable()
+            {
+                data.rwx_regions += 1;
+                data.suspicious_allocations += 1;
+            }
+
+            // Private vs shared - check region type
+            if region.region_type.contains("PRIVATE") || region.region_type.contains("private") {
+                data.private_regions += 1;
+            }
+        }
+
+        let threads = thread::enumerate_threads(proc.pid).ok();
+        let result = engine.analyze_process(proc, &regions, threads.as_deref());
+
+        data.threat_level = result.threat_level;
+        if result.threat_level != ThreatLevel::Clean {
+            data.detection = Some(DetectionEvent {
+                timestamp: Utc::now(),
+                process: proc.clone(),
+                threat_level: result.threat_level,
+                indicators: result.indicators,
+                confidence: result.confidence,
+                threat_context: result.threat_context,
+            });
+        }
+
+        Some(data)
+    }
+
+    /// Folds one process's scan result into the live stats so the UI
+    /// updates as the scan progresses. Cheap - safe under the shared lock.
+    pub fn record_scan_result(&mut self, scanned: usize, data: Option<ProcessScanData>) {
+        if let Some((_, total)) = self.scan_progress {
+            self.scan_progress = Some((scanned, total));
+        }
+
+        let Some(data) = data else { return };
+
+        match data.threat_level {
+            ThreatLevel::Suspicious => self.stats.suspicious_processes += 1,
+            ThreatLevel::Malicious => self.stats.malicious_processes += 1,
+            ThreatLevel::Clean => {}
+        }
+
+        let mem = &mut self.memory_stats;
+        mem.total_regions += data.total_regions;
+        mem.rwx_regions += data.rwx_regions;
+        mem.private_regions += data.private_regions;
+        mem.shared_regions = mem.total_regions.saturating_sub(mem.private_regions);
+        mem.suspicious_allocations += data.suspicious_allocations;
+        let largest_mb = data.largest_region_bytes as f64 / 1024.0 / 1024.0;
+        if largest_mb > mem.largest_region_mb {
+            mem.largest_region_mb = largest_mb;
+        }
+        mem.total_committed_mb += data.committed_bytes as f64 / 1024.0 / 1024.0;
+
+        if let Some(detection) = data.detection {
+            self.add_detection(detection);
+            self.stats.total_detections = self.detections.len();
+        }
+    }
+
+    /// Finalizes a scan pass. Cheap - safe under the shared lock.
+    pub fn finish_scan(&mut self, scan_time_ms: u64) {
+        self.stats.scan_time_ms = scan_time_ms;
+        self.stats.total_detections = self.detections.len();
+        self.stats.memory_usage_mb = self.estimate_memory_usage();
+        self.scan_progress = None;
         self.last_scan = Some(Instant::now());
         self.add_log_message(format!(
-            "Scan complete: {} processes, {} detections in {}ms",
+            "Scan complete: {} processes, {} total detections in {}ms",
             self.processes.len(),
-            outcome.detection_count,
-            outcome.scan_time_ms
+            self.detections.len(),
+            scan_time_ms
         ));
     }
 

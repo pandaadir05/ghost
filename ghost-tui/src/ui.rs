@@ -63,12 +63,20 @@ pub fn draw(f: &mut Frame, app: &App) {
 }
 
 fn draw_header(f: &mut Frame, area: Rect, app: &App) {
+    let title = match app.scan_progress {
+        Some((scanned, total)) => format!(
+            "Ghost - Process Injection Detection [scanning {}/{}]",
+            scanned, total
+        ),
+        None => "Ghost - Process Injection Detection".to_string(),
+    };
+
     let titles = app.get_tab_titles();
     let tabs = Tabs::new(titles)
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .title("Ghost - Process Injection Detection")
+                .title(title)
                 .title_style(Style::default().fg(PRIMARY).add_modifier(Modifier::BOLD))
                 .border_style(Style::default().fg(PRIMARY)),
         )

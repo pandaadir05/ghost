@@ -4,12 +4,16 @@ use crossterm::{
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use ghost_core::DetectionEngine;
+use ghost_core::{process, DetectionEngine};
 use ratatui::{
     backend::{Backend, CrosstermBackend},
     Terminal,
 };
-use std::{io, panic, sync::Arc, time::Duration};
+use std::{
+    io, panic,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 use tokio::{
     sync::{Mutex, Notify},
     time,
@@ -100,8 +104,10 @@ async fn main() -> Result<()> {
     let refresh_signal = Arc::clone(&refresh);
 
     // Start background scanning task with initial delay to let UI render.
-    // The task owns the detection engine and scans WITHOUT the app lock;
-    // holding the lock for a whole scan blanks the UI and drops input.
+    // The task owns the detection engine and analyzes processes WITHOUT the
+    // app lock, streaming each result into the shared state under a brief
+    // lock so the UI fills in live instead of all at once - a full sweep
+    // can take minutes on busy systems.
     tokio::spawn(async move {
         let mut engine = detection_engine;
 
@@ -109,18 +115,34 @@ async fn main() -> Result<()> {
         time::sleep(Duration::from_millis(100)).await;
 
         let mut interval = time::interval(Duration::from_secs(2));
+        interval.set_missed_tick_behavior(time::MissedTickBehavior::Delay);
         loop {
             tokio::select! {
                 _ = interval.tick() => {}
                 _ = refresh_signal.notified() => {}
             }
 
-            let result = App::perform_scan(&mut engine);
-            let mut app = app_clone.lock().await;
-            match result {
-                Ok(outcome) => app.apply_scan(outcome),
-                Err(e) => app.add_log_message(format!("Scan error: {}", e)),
+            let processes = match process::enumerate_processes() {
+                Ok(procs) => procs,
+                Err(e) => {
+                    let mut app = app_clone.lock().await;
+                    app.add_log_message(format!("Scan error: process enumeration failed: {}", e));
+                    continue;
+                }
+            };
+
+            let scan_start = Instant::now();
+            app_clone.lock().await.begin_scan(processes.clone());
+
+            for (i, proc) in processes.iter().enumerate() {
+                let data = App::scan_process(&mut engine, proc);
+                app_clone.lock().await.record_scan_result(i + 1, data);
             }
+
+            app_clone
+                .lock()
+                .await
+                .finish_scan(scan_start.elapsed().as_millis() as u64);
         }
     });
 
