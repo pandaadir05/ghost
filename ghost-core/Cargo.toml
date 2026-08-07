@@ -26,7 +26,7 @@ hostname = "0.4"
 yara = { version = "0.28", optional = true }
 sha2 = "0.10"
 reqwest = { version = "0.11", features = ["json"] }
-pyo3 = { version = "0.24.1", optional = true, features = ["auto-initialize"] }
+pyo3 = { version = "0.29", optional = true, features = ["auto-initialize"] }
 regex-lite = "0.1"
 
 [target.'cfg(windows)'.dependencies]

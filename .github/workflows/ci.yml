@@ -177,6 +177,7 @@ jobs:
     permissions:
       issues: write
       contents: read
+      checks: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
