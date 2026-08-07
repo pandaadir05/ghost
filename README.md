@@ -21,16 +21,11 @@ Some of the things it can detect:
 
 It also maps detected behaviors to the MITRE ATT&CK framework, which is helpful if you're documenting threats or writing reports.
 
-## Screenshots
+## Demo
 
-### Detection Dashboard
-![Ghost TUI - Detection Overview](assets/screenshot1.png)
+![Ghost TUI mid-scan](assets/tui-demo.gif)
 
-### Active Threats
-![Detected Malware](assets/screenshot2.png)
-
-### Live Monitoring
-![Real-time Process Analysis Logs](assets/screenshot3.png)
+Results stream in as each process is analyzed, with live progress in the title bar (`[scanning N/M]`).
 
 ## Building it
 
@@ -74,7 +69,18 @@ cargo run --bin ghost-cli --release -- --watch --interval 10
 cargo run --bin ghost-tui --release
 ```
 
-The TUI gives you a dashboard with live stats, detection history, and you can navigate around with keyboard shortcuts (Tab to switch views, Q to quit).
+The TUI has six tabs: Overview, Processes, Detections, Threat Intel, Memory, and Logs. A scan runs in the background and results stream in live as each process is analyzed, with `[scanning N/M]` progress shown in the header.
+
+Keybindings:
+
+- `Tab` / `Shift+Tab` or `Left`/`Right` - switch tabs
+- `Up`/`Down` - navigate the list on the current tab (selection is highlighted with `>>`)
+- `Enter` - view details for the selected process (Processes tab)
+- `R` - trigger a rescan
+- `C` - clear the current tab's data (detections on Overview/Detections, logs on Logs)
+- `Q` - quit
+
+`Esc` is deliberately not bound to quit - some terminals deliver stray Escape bytes from focus or OSC sequences, which would otherwise close the app unexpectedly.
 
 ## Shell Completions
 
@@ -251,16 +257,7 @@ Ghost auto-detects the webhook type from the URL:
 - `discord.com/api/webhooks` → Discord format with embeds
 - Everything else → Generic JSON payload
 
-**Slack alerts** include color-coded attachments with threat level, confidence score, and top indicators:
-
-```
-🚨 Ghost detected suspicious activity on *prod-server-01*
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-🚨 suspicious.exe (PID: 4521)
-• RWX memory region detected at 0x7ff...
-• Shellcode pattern: NOP sled
-Threat Level: Malicious | Confidence: 87%
-```
+**Slack alerts** include color-coded attachments (red/orange/green by threat level) with the process name, PID, top indicators, threat level, and confidence score as fields. No emoji in the payload - message text reads "Ghost detected suspicious activity on *hostname*".
 
 **Discord alerts** use rich embeds with the same information in a clean format.
 
@@ -280,7 +277,7 @@ Threat Level: Malicious | Confidence: 87%
 
 ## What the results mean
 
-When Ghost finds something suspicious, it assigns a threat level: Clean, Low, Medium, High, or Critical. This is based on how many indicators it found and how serious they are.
+Ghost assigns one of three threat levels: Clean, Suspicious, or Malicious. A confidence score alone doesn't decide the verdict - `Malicious` additionally requires at least one high-specificity indicator (like a thread starting in unbacked executable memory), so a pile of weak, generic signals can't add up to a malicious verdict on their own. That corroboration requirement is what keeps things like JIT-heavy processes with unbacked RWX memory at `Suspicious` instead of `Malicious`.
 
 High confidence doesn't always mean malware - some legit software does weird stuff with memory too. Use your judgment and investigate further if needed.
 
@@ -298,7 +295,11 @@ It's designed to be fast enough for continuous monitoring. A full system scan (2
 
 ## YARA rules
 
-The tool includes YARA rule integration. Rules are stored in the `rules/` directory and cover common malware families like Metasploit, Cobalt Strike, generic shellcode patterns, and evasion techniques. You can add your own rules - just drop `.yar` files in that folder.
+The tool includes YARA rule integration, built with `--features yara-scanning`. Rules are stored in the `rules/` directory and cover common malware families like Metasploit, Cobalt Strike, generic shellcode patterns, and evasion techniques. You can add your own rules - just drop `.yar` files in that folder.
+
+Ghost looks for rules in this order: the `GHOST_RULES_DIR` environment variable, then next to the running executable, then the current working directory.
+
+Prebuilt release archives and the Docker image currently ship YARA support only on the `x86_64-unknown-linux-gnu` target - other platforms in the release matrix are built with `--no-default-features` and won't load rules until someone adds a proven path to a system YARA library for them.
 
 ## Exit codes
 
@@ -313,7 +314,7 @@ This is a userspace tool with the following limitations:
 - **Kernel-level threats**: Cannot detect kernel rootkits or kernel-mode injection without kernel-level support (e.g., eBPF on Linux, which is currently a stub implementation)
 - **Machine learning features**: Neural network analysis and behavioral ML predictions are simulated and require trained models to be functional
 - **Threat intelligence**: The threat intelligence framework exists but has no active feed connections or IOC database
-- **False positives**: Legitimate software like game anti-cheat, debuggers, sandboxes, and browsers with JIT compilers may trigger detections due to their memory manipulation techniques
+- **False positives**: A scan of a clean Windows 11 desktop (~330 processes) previously reported 187 processes as `Malicious`; the detection logic has since been reworked and that same scan now reports 0. JIT-heavy processes (browsers, some game clients) still show up as `Suspicious` due to unbacked RWX memory, which is a real but not inherently malicious pattern worth triage rather than a verdict
 - **macOS**: Hook detection fully implemented with DYLD_INSERT_LIBRARIES and inline hook detection using nm-based function address resolution
 - **Performance claims**: Documented performance metrics are targets and have not been validated through comprehensive benchmarks
 
