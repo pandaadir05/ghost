@@ -7,6 +7,11 @@ use std::time::{Duration, SystemTime};
 
 /// Advanced Evasion Detection Module
 /// Detects sophisticated anti-analysis and evasion techniques
+///
+/// Several `detect_*` methods below return `None` unconditionally: they used
+/// to return a hardcoded `EvasionTechnique` on every call, fabricating
+/// indicators (e.g. "RDTSC instruction usage") that were never actually
+/// observed. Each now documents the specific telemetry it would need instead.
 #[derive(Debug)]
 pub struct EvasionDetector {
     timing_analyzer: TimingAnalyzer,
@@ -788,10 +793,6 @@ impl TimingAnalyzer {
     }
 
     fn detect_sleep_evasion(&self, _process: &ProcessInfo) -> Option<EvasionTechnique> {
-        // Detect various sleep-based evasion techniques
-        // This would analyze actual sleep patterns in a real implementation
-        // Not implemented: this returned a hardcoded detection for every
-        // process, fabricating indicators that were never observed.
         // Requires NtDelayExecution call tracing (ETW Threat-Intelligence),
         // which this scanner does not collect.
         None
@@ -802,9 +803,6 @@ impl TimingAnalyzer {
         _process: &ProcessInfo,
         _threads: &[ThreadInfo],
     ) -> Option<EvasionTechnique> {
-        // Detect timing-based anti-analysis techniques
-        // Not implemented: this returned a hardcoded detection for every
-        // process, fabricating indicators that were never observed.
         // Requires instruction-level tracing of RDTSC/QueryPerformanceCounter,
         // which this scanner does not collect.
         None
@@ -873,23 +871,17 @@ impl EnvironmentChecker {
     }
 
     fn detect_vm_evasion(&self, _process: &ProcessInfo) -> Option<EvasionTechnique> {
-        // Not implemented: this returned a hardcoded detection for every
-        // process, fabricating indicators that were never observed.
         // Requires observing the process query VM artifacts; not collected.
         None
     }
 
     fn detect_debugger_evasion(&self, _process: &ProcessInfo) -> Option<EvasionTechnique> {
-        // Not implemented: this returned a hardcoded detection for every
-        // process, fabricating indicators that were never observed.
         // Requires observing IsDebuggerPresent/PEB->BeingDebugged reads;
         // not collected.
         None
     }
 
     fn detect_sandbox_evasion(&self, _process: &ProcessInfo) -> Option<EvasionTechnique> {
-        // Not implemented: this returned a hardcoded detection for every
-        // process, fabricating indicators that were never observed.
         // Requires observing user-interaction probing; not collected.
         None
     }
@@ -981,8 +973,6 @@ impl ApiHookingDetector {
     }
 
     pub fn detect_api_evasion(&self, _process: &ProcessInfo) -> Option<EvasionTechnique> {
-        // Not implemented: this returned a hardcoded detection for every
-        // process, fabricating indicators that were never observed.
         // Superseded by the hook scanner, which inspects real prologues.
         None
     }
@@ -1020,8 +1010,6 @@ impl ExecutionFlowAnalyzer {
         _process: &ProcessInfo,
         _memory_regions: &[MemoryRegion],
     ) -> Option<EvasionTechnique> {
-        // Not implemented: this returned a hardcoded detection for every
-        // process, fabricating indicators that were never observed.
         // Requires stack walking and disassembly to identify real ROP/JOP
         // chains; neither is collected here.
         None
@@ -1121,8 +1109,6 @@ impl ObfuscationDetector {
         _process: &ProcessInfo,
         _memory_regions: &[MemoryRegion],
     ) -> Option<EvasionTechnique> {
-        // Not implemented: this returned a hardcoded detection for every
-        // process, fabricating indicators that were never observed.
         // Requires real section-entropy measurement; not collected.
         None
     }
@@ -1132,8 +1118,6 @@ impl ObfuscationDetector {
         _process: &ProcessInfo,
         _memory_regions: &[MemoryRegion],
     ) -> Option<EvasionTechnique> {
-        // Not implemented: this returned a hardcoded detection for every
-        // process, fabricating indicators that were never observed.
         // Requires disassembly-based control-flow analysis; not collected.
         None
     }

@@ -71,7 +71,7 @@ pub struct RuleMatch {
     pub matched_strings: Vec<String>,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ThreatLevel {
     Info = 1,
     Low = 2,

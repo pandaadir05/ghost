@@ -353,22 +353,10 @@ impl DetectionEngine {
                         yara_result.scan_time_ms
                     );
 
-                    for yara_match in &yara_result.matches {
-                        indicators.push(format!(
-                            "YARA: {} matched at {:#x} (threat level: {:?})",
-                            yara_match.rule_name, yara_match.offset, yara_match.threat_level
-                        ));
-
-                        // Adjust confidence based on threat level
-                        let threat_boost = match yara_match.threat_level {
-                            crate::yara_engine::ThreatLevel::Critical => 0.8,
-                            crate::yara_engine::ThreatLevel::High => 0.6,
-                            crate::yara_engine::ThreatLevel::Medium => 0.4,
-                            crate::yara_engine::ThreatLevel::Low => 0.2,
-                            crate::yara_engine::ThreatLevel::Info => 0.1,
-                        };
-                        confidence += threat_boost;
-                    }
+                    let (yara_score, yara_indicators) =
+                        Self::score_yara_matches(&yara_result.matches, memory_regions);
+                    indicators.extend(yara_indicators);
+                    confidence += yara_score;
                 }
             }
         }
@@ -615,11 +603,6 @@ impl DetectionEngine {
             ));
             *confidence += 0.15;
         }
-
-        // NOTE: a "suspicious memory gaps" check used to live here, firing on
-        // any 1-16MB gap between committed regions. That is the size of a
-        // default thread stack reservation, so it matched essentially every
-        // process. Gaps in the address space carry no injection signal.
     }
 
     /// Analyze thread patterns for injection indicators.
@@ -651,22 +634,12 @@ impl DetectionEngine {
             ));
             *confidence += 0.6;
         }
-
-        // NOTE: two checks used to live here and both fired on every process.
-        // One tested `start_address & 0xFFFF_0000 != 0x7FF0_0000`, a 32-bit
-        // era constant that no 64-bit address satisfies. The other counted
-        // threads with `creation_time > 0` as "recently created", but that
-        // field is an absolute FILETIME, so it is non-zero for every live
-        // thread and the ratio was always 1.0.
     }
 
-    /// Locates the YARA rules directory.
-    ///
-    /// The path used to be the bare relative literal "rules", so the engine
-    /// silently disabled itself whenever ghost ran from any directory other
-    /// than the source tree - which is every installed deployment. Look
-    /// next to the executable first, then at an explicit override, then the
-    /// working directory.
+    /// Locates the YARA rules directory: `GHOST_RULES_DIR` if set, then
+    /// next to the running executable (or one/two directories up, to find
+    /// a workspace-root `rules/` from a `target/{debug,release}` binary),
+    /// then the current working directory.
     fn resolve_rules_dir() -> Option<String> {
         if let Ok(dir) = std::env::var("GHOST_RULES_DIR") {
             if std::path::Path::new(&dir).is_dir() {
@@ -759,6 +732,81 @@ impl DetectionEngine {
                 && address < r.base_address.saturating_add(r.size)
                 && r.region_type == "PRIVATE"
                 && r.protection.is_executable()
+        })
+    }
+
+    /// Aggregates YARA matches per rule and enforces `scan_context`.
+    ///
+    /// `scan_memory_with_yara` emits one `RuleMatch` per matched string
+    /// occurrence, so a rule with several short strings hitting in one
+    /// region produces many entries. Scoring each separately reproduces the
+    /// same runaway-confidence bug the shellcode-signature aggregation
+    /// above fixes, just for YARA instead: a single noisy rule could reach
+    /// maximum confidence on its own. Matches are grouped by rule name and
+    /// scored once, at that rule's highest observed threat level.
+    ///
+    /// Rules tagged `scan_context = "memory_region"` describe shellcode and
+    /// syscall-stub shapes that also occur in ordinary image-backed code
+    /// (e.g. inside `ntdll` itself); a match is only kept for those rules
+    /// when it lands outside every mapped image.
+    fn score_yara_matches(
+        matches: &[crate::yara_engine::RuleMatch],
+        regions: &[MemoryRegion],
+    ) -> (f32, Vec<String>) {
+        use std::collections::BTreeMap;
+
+        let mut by_rule: BTreeMap<String, (crate::yara_engine::ThreatLevel, u64, usize)> =
+            BTreeMap::new();
+
+        for m in matches {
+            if m.metadata.get("scan_context").map(String::as_str) == Some("memory_region")
+                && Self::is_image_backed(regions, m.offset as usize)
+            {
+                continue;
+            }
+
+            let entry = by_rule
+                .entry(m.rule_name.clone())
+                .or_insert((m.threat_level, m.offset, 0));
+            entry.2 += 1;
+            if m.threat_level > entry.0 {
+                entry.0 = m.threat_level;
+                entry.1 = m.offset;
+            }
+        }
+
+        let mut indicators = Vec::with_capacity(by_rule.len());
+        let mut score = 0.0f32;
+        for (rule_name, (threat_level, offset, count)) in &by_rule {
+            indicators.push(format!(
+                "YARA: {} matched at {:#x} ({}x, threat level: {:?})",
+                rule_name, offset, count, threat_level
+            ));
+            score += match threat_level {
+                crate::yara_engine::ThreatLevel::Critical => 0.8,
+                crate::yara_engine::ThreatLevel::High => 0.6,
+                crate::yara_engine::ThreatLevel::Medium => 0.4,
+                crate::yara_engine::ThreatLevel::Low => 0.2,
+                crate::yara_engine::ThreatLevel::Info => 0.1,
+            };
+        }
+
+        // Unlike the shellcode byte-signatures above, distinct YARA rules
+        // matching the same process is corroborating evidence, not volume
+        // noise - a beacon-config rule and a sleep-obfuscation rule both
+        // firing is a stronger signal than either alone, so their scores
+        // are summed rather than capped as a category. The overall
+        // confidence is still clamped to 1.0 by the caller.
+        (score, indicators)
+    }
+
+    /// True when `address` falls inside a region mapped from a file/image
+    /// (as opposed to private, anonymously allocated memory).
+    fn is_image_backed(regions: &[MemoryRegion], address: usize) -> bool {
+        regions.iter().any(|r| {
+            address >= r.base_address
+                && address < r.base_address.saturating_add(r.size)
+                && r.region_type == "IMAGE"
         })
     }
 
@@ -867,5 +915,149 @@ impl Default for DetectionEngine {
         Self::new().unwrap_or_else(|e| {
             panic!("Failed to create default DetectionEngine: {}", e);
         })
+    }
+}
+
+#[cfg(test)]
+mod yara_scoring_tests {
+    use super::*;
+    use crate::yara_engine::{RuleMatch, ThreatLevel as YaraThreatLevel};
+    use std::collections::HashMap;
+
+    fn rule_match(rule_name: &str, offset: u64, threat_level: YaraThreatLevel) -> RuleMatch {
+        rule_match_with_metadata(rule_name, offset, threat_level, HashMap::new())
+    }
+
+    fn rule_match_with_metadata(
+        rule_name: &str,
+        offset: u64,
+        threat_level: YaraThreatLevel,
+        metadata: HashMap<String, String>,
+    ) -> RuleMatch {
+        RuleMatch {
+            rule_name: rule_name.to_string(),
+            namespace: "default".to_string(),
+            threat_level,
+            offset,
+            length: 4,
+            metadata,
+            matched_strings: vec!["$s1".to_string()],
+        }
+    }
+
+    fn private_region(base: usize, size: usize) -> MemoryRegion {
+        MemoryRegion {
+            base_address: base,
+            size,
+            protection: MemoryProtection::ReadWriteExecute,
+            region_type: "PRIVATE".to_string(),
+        }
+    }
+
+    fn image_region(base: usize, size: usize) -> MemoryRegion {
+        MemoryRegion {
+            base_address: base,
+            size,
+            protection: MemoryProtection::ReadExecute,
+            region_type: "IMAGE".to_string(),
+        }
+    }
+
+    #[test]
+    fn repeated_string_matches_for_one_rule_score_once() {
+        // A rule with several short strings matching in the same region used
+        // to produce one RuleMatch per matched string, each adding its own
+        // confidence boost - a single noisy rule could reach the maximum
+        // score alone. It should now be scored once, at its highest
+        // observed threat level, regardless of how many strings hit.
+        let matches: Vec<RuleMatch> = (0..20)
+            .map(|i| rule_match("Noisy Rule", 0x1000 + i, YaraThreatLevel::Critical))
+            .collect();
+
+        let (score, indicators) = DetectionEngine::score_yara_matches(&matches, &[]);
+
+        assert_eq!(
+            indicators.len(),
+            1,
+            "expected one indicator per rule, not per match"
+        );
+        assert!(
+            (score - 0.8).abs() < f32::EPSILON,
+            "expected the single Critical boost (0.8), got {score}"
+        );
+    }
+
+    #[test]
+    fn distinct_rules_corroborate_and_sum() {
+        // Several different rules matching the same process (e.g. a
+        // beacon-config rule and a sleep-obfuscation rule both firing) is
+        // corroborating evidence, unlike repeated occurrences of one rule -
+        // it should sum rather than be capped as a single category.
+        let matches: Vec<RuleMatch> = (0..3)
+            .map(|i| {
+                rule_match(
+                    &format!("Rule {i}"),
+                    0x1000 + i as u64 * 0x100,
+                    YaraThreatLevel::Medium,
+                )
+            })
+            .collect();
+
+        let (score, indicators) = DetectionEngine::score_yara_matches(&matches, &[]);
+
+        assert_eq!(indicators.len(), 3);
+        assert!(
+            (score - 1.2).abs() < f32::EPSILON,
+            "expected three Medium boosts (0.4 each) to sum, got {score}"
+        );
+    }
+
+    #[test]
+    fn scan_context_memory_region_is_dropped_inside_an_image() {
+        let mut metadata = HashMap::new();
+        metadata.insert("scan_context".to_string(), "memory_region".to_string());
+
+        let matches = vec![rule_match_with_metadata(
+            "Syscall Stub",
+            0x7000,
+            YaraThreatLevel::Critical,
+            metadata,
+        )];
+        let regions = vec![image_region(0x6000, 0x2000)];
+
+        let (score, indicators) = DetectionEngine::score_yara_matches(&matches, &regions);
+
+        assert_eq!(score, 0.0, "match inside an IMAGE region should be dropped");
+        assert!(indicators.is_empty());
+    }
+
+    #[test]
+    fn scan_context_memory_region_is_kept_in_private_memory() {
+        let mut metadata = HashMap::new();
+        metadata.insert("scan_context".to_string(), "memory_region".to_string());
+
+        let matches = vec![rule_match_with_metadata(
+            "Syscall Stub",
+            0x7000,
+            YaraThreatLevel::Critical,
+            metadata,
+        )];
+        let regions = vec![private_region(0x6000, 0x2000)];
+
+        let (score, indicators) = DetectionEngine::score_yara_matches(&matches, &regions);
+
+        assert!(score > 0.0, "match in private memory should still score");
+        assert_eq!(indicators.len(), 1);
+    }
+
+    #[test]
+    fn rules_without_scan_context_are_unaffected_by_region_type() {
+        let matches = vec![rule_match("Generic Rule", 0x7000, YaraThreatLevel::Medium)];
+        let regions = vec![image_region(0x6000, 0x2000)];
+
+        let (score, indicators) = DetectionEngine::score_yara_matches(&matches, &regions);
+
+        assert!(score > 0.0);
+        assert_eq!(indicators.len(), 1);
     }
 }

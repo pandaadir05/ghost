@@ -504,7 +504,6 @@ mod platform {
                         match crate::pe_parser::detect_iat_hooks(
                             target_pid,
                             base_address,
-                            &disk_path,
                             memory_reader,
                         ) {
                             Ok(iat_result) => {

@@ -219,12 +219,12 @@ pub fn parse_iat_from_memory(
     Ok(imports)
 }
 
-/// Compare IAT entries between memory and disk to detect hooks
+/// Detects IAT hooks by checking whether each resolved import points into a
+/// mapped image, rather than into unbacked (injected) memory.
 #[cfg(windows)]
 pub fn detect_iat_hooks(
     pid: u32,
     base_address: usize,
-    disk_path: &str,
     memory_reader: impl Fn(u32, usize, usize) -> Result<Vec<u8>>,
 ) -> Result<IATHookResult> {
     // Parse IAT from process memory
@@ -265,10 +265,6 @@ pub fn detect_iat_hooks(
         }
     }
 
-    // `disk_path` is retained for the caller's module-identification logic and
-    // for future on-disk comparison of the export itself.
-    let _ = disk_path;
-
     let total = memory_imports.len();
     let hook_percentage = if total > 0 {
         (hooked_count as f32 / total as f32) * 100.0
@@ -282,55 +278,6 @@ pub fn detect_iat_hooks(
         hook_percentage,
     })
 }
-
-/// Parse IAT from disk file.
-///
-/// Retained for the on-disk export comparison noted in `detect_iat_hooks`.
-/// The runtime-vs-disk IAT comparison it was originally written for cannot
-/// identify hooks, because disk IAT slots hold RVAs into the hint/name table
-/// rather than resolved function addresses.
-#[cfg(windows)]
-#[allow(dead_code)]
-fn parse_iat_from_disk(file_path: &str) -> Result<Vec<ImportEntry>> {
-    use std::fs::File;
-    use std::io::Read;
-
-    let mut file = File::open(file_path).map_err(|e| GhostError::Configuration {
-        message: format!("Failed to open file: {}", e),
-    })?;
-
-    let mut buffer = Vec::new();
-    file.read_to_end(&mut buffer)
-        .map_err(|e| GhostError::Configuration {
-            message: format!("Failed to read file: {}", e),
-        })?;
-
-    parse_iat_from_buffer(&buffer)
-}
-
-/// Parse IAT from memory buffer
-#[cfg(windows)]
-#[allow(dead_code)]
-fn parse_iat_from_buffer(buffer: &[u8]) -> Result<Vec<ImportEntry>> {
-    let reader = |_pid: u32, offset: usize, size: usize| -> Result<Vec<u8>> {
-        if offset + size > buffer.len() {
-            return Err(GhostError::MemoryRead {
-                message: "Buffer overflow".to_string(),
-            });
-        }
-        Ok(buffer[offset..offset + size].to_vec())
-    };
-
-    parse_iat_from_memory(0, 0, reader)
-}
-
-// REMOVED: addresses_match_with_aslr.
-//
-// It compared `addr & 0xFFFF_0000_0000_0000` for both operands, but bits
-// 48-63 are zero for every x64 user-mode address, so it returned true
-// unconditionally and IAT hook detection never fired. Hook identification is
-// now done by checking whether a resolved import points into a mapped image,
-// which is a property that can actually be observed.
 
 // Helper functions for reading PE structures
 
@@ -456,7 +403,6 @@ pub fn parse_iat_from_memory(
 pub fn detect_iat_hooks(
     _pid: u32,
     _base_address: usize,
-    _disk_path: &str,
     _memory_reader: impl Fn(u32, usize, usize) -> Result<Vec<u8>>,
 ) -> Result<IATHookResult> {
     Err(GhostError::PlatformNotSupported {

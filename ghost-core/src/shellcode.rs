@@ -162,11 +162,6 @@ impl ShellcodeDetector {
             confidence: 0.98,
         });
 
-        // REMOVED: "x64 Stack Setup Pattern" ({ 48 83 EC 28 48 83 E4 F0 }).
-        // "sub rsp,0x28 ; and rsp,-16" is the stack setup MSVC emits for
-        // ordinary functions, so it matched throughout every JIT-generated
-        // region at confidence 0.7.
-
         // ===== Position-Independent Code Patterns =====
 
         // Call-pop technique (get current EIP/RIP)
@@ -293,11 +288,6 @@ impl ShellcodeDetector {
             name: "NOP Sled",
             confidence: 0.6,
         });
-
-        // REMOVED: "PUSH/RET Control Flow".
-        // Its pattern was the single byte 0x68 ("push imm32"), which occurs
-        // constantly in any compiled code - it cannot function as a
-        // standalone signature at any confidence.
 
         // ===== Process Hollowing/Injection Indicators =====
 

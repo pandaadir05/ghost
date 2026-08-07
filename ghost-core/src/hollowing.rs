@@ -211,14 +211,10 @@ impl HollowingDetector {
             return None;
         }
 
-        // NOTE: a numeric image-base range check used to live here, testing
-        // for 0x400000..0x80000000 - the 32-bit user address range. Under
-        // x64 + mandatory ASLR every module loads above that window, so it
-        // fired on every 64-bit process. Base address alone carries no
-        // hollowing signal; the real primitive is a main module that is
-        // missing from the loader list or whose memory is not MEM_IMAGE,
-        // which is covered by the UnmappedMainImage check above.
-
+        // Base address alone carries no hollowing signal under x64 with
+        // mandatory ASLR: every module loads above the legacy 32-bit range.
+        // The real primitive is a main module missing from the loader list
+        // or whose memory is not MEM_IMAGE, covered above.
         None
     }
 
