@@ -8,85 +8,73 @@ rule CobaltStrike_Beacon_Memory
         reference = "https://www.cobaltstrike.com/"
 
     strings:
-        $beacon_1 = "%s as %s\\%s: %d" wide
-        $beacon_2 = "beacon.dll" nocase
-        $beacon_3 = "beacon.x64.dll" nocase
-        $beacon_4 = { 69 68 69 68 69 6B ?? 69 6B 69 68 69 6B }
-        $config_marker = { 00 01 00 01 00 02 ?? ?? 00 02 00 01 00 02 }
-        $sleep_mask = { 48 89 5C 24 08 57 48 83 EC 20 48 8B D9 33 FF }
+        // Beacon format strings are ASCII in memory; "wide" alone made these
+        // UTF-16-only and therefore unmatchable against real samples.
+        $beacon_1 = "%s as %s\\%s: %d" ascii wide
+        $beacon_2 = "beacon.dll" ascii wide nocase
+        $beacon_3 = "beacon.x64.dll" ascii wide nocase
+        $beacon_4 = "Could not connect to pipe (%s): %d" ascii wide
 
     condition:
         2 of them
 }
 
-rule CobaltStrike_Beacon_Config
+rule CobaltStrike_Beacon_Config_Block
 {
     meta:
-        description = "Detects Cobalt Strike Beacon configuration structure"
+        description = "Cobalt Strike beacon config TLV header (plaintext, XOR 0x2e v3.x, XOR 0x69 v4.x)"
         author = "Ghost Detection Engine"
+        date = "2026-08-05"
         threat_level = "critical"
-        mitre_attack = "T1071"
+        mitre_attack = "T1055.001"
+        scan_context = "memory_region"
 
     strings:
-        $config_1 = { 00 01 00 01 00 02 }
-        $config_2 = { 00 02 00 01 00 02 }
-        $config_3 = { 00 03 00 02 }
-        $http_header = "MZ" wide
-        $named_pipe = "\\\\.\\pipe\\" wide
+        // The config header encodes 16-bit values, so each field needs TWO
+        // wildcard bytes. The previous XOR-0x69 pattern had a single wildcard
+        // and was therefore misaligned by one byte - it could never match a
+        // real beacon. The plaintext and XOR-0x2e (3.x) variants were missing.
+        $plain = { 00 01 00 01 00 02 ?? ?? 00 02 00 01 00 02 ?? ?? 00 03 00 02 }
+        $xor2e = { 2E 2F 2E 2F 2E 2C ?? ?? 2E 2C 2E 2F 2E 2C ?? ?? 2E 2D 2E 2C }
+        $xor69 = { 69 68 69 68 69 6B ?? ?? 69 6B 69 68 69 6B ?? ?? 69 6A 69 6B }
 
     condition:
-        2 of ($config_*) or ($config_1 and ($http_header or $named_pipe))
+        any of them
 }
 
 rule CobaltStrike_Named_Pipe_Beacon
 {
     meta:
-        description = "Detects Cobalt Strike named pipe beacon patterns"
+        description = "Detects Cobalt Strike default post-exploitation pipe names"
         author = "Ghost Detection Engine"
+        date = "2026-08-05"
         threat_level = "high"
         mitre_attack = "T1090"
 
     strings:
-        $pipe_1 = "\\\\.\\pipe\\MSSE-" wide
-        $pipe_2 = "\\\\.\\pipe\\postex_" wide
-        $pipe_3 = "\\\\.\\pipe\\msagent_" wide
-        $pipe_4 = "\\\\.\\pipe\\status_" wide
+        // Pipe names are ASCII in memory - "wide" alone never matched.
+        $pipe_1 = "\\\\.\\pipe\\MSSE-" ascii wide
+        $pipe_2 = "\\\\.\\pipe\\postex_" ascii wide
+        $pipe_3 = "\\\\.\\pipe\\msagent_" ascii wide
+        $pipe_4 = "\\\\.\\pipe\\status_" ascii wide
 
     condition:
         any of them
 }
 
-rule CobaltStrike_Artifact_Kit_Payload
-{
-    meta:
-        description = "Detects Cobalt Strike Artifact Kit generated payloads"
-        author = "Ghost Detection Engine"
-        threat_level = "critical"
-        mitre_attack = "T1055.002"
-
-    strings:
-        $artifact_1 = { 48 8D 05 ?? ?? 00 00 48 89 44 24 ?? 48 8D 05 }
-        $artifact_2 = { 48 89 5C 24 10 48 89 74 24 18 57 48 83 EC 20 }
-        $reflective_loader = "ReflectiveLoader"
-
-    condition:
-        any of them
-}
-
-rule CobaltStrike_Malleable_C2_Profile
-{
-    meta:
-        description = "Detects Cobalt Strike malleable C2 profile indicators"
-        author = "Ghost Detection Engine"
-        threat_level = "high"
-        mitre_attack = "T1071.001"
-
-    strings:
-        $header_1 = "Cookie: " nocase
-        $header_2 = "Accept: */*" nocase
-        $header_3 = "User-Agent: Mozilla/" nocase
-        $uri_pattern = /\/[a-z]{4,12}\/[a-z]{4,12}/
-
-    condition:
-        3 of them
-}
+// REMOVED: CobaltStrike_Artifact_Kit_Payload.
+// $artifact_2 = { 48 89 5C 24 10 48 89 74 24 18 57 48 83 EC 20 } is the
+// canonical MSVC x64 function prologue, present thousands of times in every
+// Microsoft DLL. With "any of them" and threat_level "critical", this rule
+// reported critical Cobalt Strike on every process on the machine.
+// "ReflectiveLoader" survives in process_injection.yar.
+//
+// REMOVED: CobaltStrike_Malleable_C2_Profile.
+// "Cookie: ", "Accept: */*", "User-Agent: Mozilla/" and a generic
+// /word/word URI regex with "3 of them" matches every browser, every HTTP
+// client, every updater and curl. Malleable profiles are designed to look
+// exactly like ordinary traffic, so profile mimicry is not detectable this
+// way; beacon config structure (above) is the reliable signal.
+//
+// REMOVED: $sleep_mask from CobaltStrike_Beacon_Memory - it was another
+// generic MSVC prologue, mislabelled as a sleep-mask signature.

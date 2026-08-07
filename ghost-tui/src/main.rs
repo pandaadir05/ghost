@@ -4,12 +4,20 @@ use crossterm::{
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
+use ghost_core::{process, DetectionEngine};
 use ratatui::{
     backend::{Backend, CrosstermBackend},
     Terminal,
 };
-use std::{io, panic, sync::Arc, time::Duration};
-use tokio::{sync::Mutex, time};
+use std::{
+    io, panic,
+    sync::Arc,
+    time::{Duration, Instant},
+};
+use tokio::{
+    sync::{Mutex, Notify},
+    time,
+};
 
 mod app;
 mod events;
@@ -47,6 +55,19 @@ async fn main() -> Result<()> {
         .format_timestamp(None)
         .init();
 
+    // Initialize the detection engine before touching the terminal so
+    // failures print normally
+    let detection_engine = match DetectionEngine::new() {
+        Ok(engine) => engine,
+        Err(e) => {
+            eprintln!("Failed to initialize detection engine: {}", e);
+            return Err(anyhow::anyhow!(
+                "Failed to initialize detection engine: {}",
+                e
+            ));
+        }
+    };
+
     // Setup terminal with proper Windows support
     let mut terminal = match setup_terminal() {
         Ok(t) => t,
@@ -75,27 +96,58 @@ async fn main() -> Result<()> {
         terminal.draw(|f| ui::draw(f, &app_guard))?;
     }
 
+    // Wakes the scanner early when the user requests a refresh
+    let refresh = Arc::new(Notify::new());
+
     // Clone for background task
     let app_clone = Arc::clone(&app);
+    let refresh_signal = Arc::clone(&refresh);
 
-    // Start background scanning task with initial delay to let UI render
+    // Start background scanning task with initial delay to let UI render.
+    // The task owns the detection engine and analyzes processes WITHOUT the
+    // app lock, streaming each result into the shared state under a brief
+    // lock so the UI fills in live instead of all at once - a full sweep
+    // can take minutes on busy systems.
     tokio::spawn(async move {
+        let mut engine = detection_engine;
+
         // Small delay to let the first frame render
         time::sleep(Duration::from_millis(100)).await;
 
         let mut interval = time::interval(Duration::from_secs(2));
+        interval.set_missed_tick_behavior(time::MissedTickBehavior::Delay);
         loop {
-            interval.tick().await;
-            if let Ok(mut app) = app_clone.try_lock() {
-                if let Err(e) = app.update_scan_data().await {
-                    app.add_log_message(format!("Scan error: {}", e));
-                }
+            tokio::select! {
+                _ = interval.tick() => {}
+                _ = refresh_signal.notified() => {}
             }
+
+            let processes = match process::enumerate_processes() {
+                Ok(procs) => procs,
+                Err(e) => {
+                    let mut app = app_clone.lock().await;
+                    app.add_log_message(format!("Scan error: process enumeration failed: {}", e));
+                    continue;
+                }
+            };
+
+            let scan_start = Instant::now();
+            app_clone.lock().await.begin_scan(processes.clone());
+
+            for (i, proc) in processes.iter().enumerate() {
+                let data = App::scan_process(&mut engine, proc);
+                app_clone.lock().await.record_scan_result(i + 1, data);
+            }
+
+            app_clone
+                .lock()
+                .await
+                .finish_scan(scan_start.elapsed().as_millis() as u64);
         }
     });
 
     // Main event loop
-    let res = run_app(&mut terminal, app).await;
+    let res = run_app(&mut terminal, app, refresh).await;
 
     // Restore terminal
     cleanup_terminal();
@@ -108,24 +160,33 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-async fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: Arc<Mutex<App>>) -> Result<()> {
+async fn run_app<B: Backend>(
+    terminal: &mut Terminal<B>,
+    app: Arc<Mutex<App>>,
+    refresh: Arc<Notify>,
+) -> Result<()> {
     loop {
-        // Draw the UI
-        terminal.draw(|f| {
-            if let Ok(app) = app.try_lock() {
-                ui::draw(f, &app);
-            }
-        })?;
+        // Draw the UI. If the state is momentarily locked, keep the last
+        // frame - drawing without widgets would blank the screen.
+        if let Ok(app) = app.try_lock() {
+            terminal.draw(|f| ui::draw(f, &app))?;
+        }
 
-        // Handle events
-        if event::poll(Duration::from_millis(100))? {
+        // Handle events. The short poll doubles as the redraw tick, which
+        // keeps the elapsed-scan timer moving.
+        if event::poll(Duration::from_millis(50))? {
             if let Event::Key(key) = event::read()? {
                 if key.kind == KeyEventKind::Press {
                     match key.code {
-                        KeyCode::Char('q') => return Ok(()),
-                        KeyCode::Tab => {
+                        KeyCode::Char('q') | KeyCode::Char('Q') => return Ok(()),
+                        KeyCode::Tab | KeyCode::Right => {
                             if let Ok(mut app) = app.try_lock() {
                                 app.next_tab();
+                            }
+                        }
+                        KeyCode::BackTab | KeyCode::Left => {
+                            if let Ok(mut app) = app.try_lock() {
+                                app.prev_tab();
                             }
                         }
                         KeyCode::Up => {
@@ -143,16 +204,15 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: Arc<Mutex<App>>) -
                                 app.select_item();
                             }
                         }
-                        KeyCode::Char('r') => {
+                        KeyCode::Char('r') | KeyCode::Char('R') => {
                             if let Ok(mut app) = app.try_lock() {
-                                if let Err(e) = app.force_refresh().await {
-                                    app.add_log_message(format!("Refresh error: {}", e));
-                                }
+                                app.add_log_message("Forcing refresh...".to_string());
                             }
+                            refresh.notify_one();
                         }
-                        KeyCode::Char('c') => {
+                        KeyCode::Char('c') | KeyCode::Char('C') => {
                             if let Ok(mut app) = app.try_lock() {
-                                app.clear_detections();
+                                app.clear_current();
                             }
                         }
                         _ => {}

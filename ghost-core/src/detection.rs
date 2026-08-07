@@ -67,7 +67,7 @@ pub struct DetectionEngine {
     evasion_detector: EvasionDetector,
     mitre_engine: MitreAttackEngine,
     yara_engine: Option<DynamicYaraEngine>,
-    _config: Option<DetectionConfig>,
+    config: DetectionConfig,
     #[cfg(all(target_os = "linux", feature = "ebpf-detection"))]
     ebpf_detector: Option<EbpfDetector>,
 }
@@ -106,8 +106,9 @@ impl DetectionEngine {
         let evasion_detector = EvasionDetector::new();
         let mitre_engine = MitreAttackEngine::new()?;
 
-        // Initialize YARA engine with default rules directory
-        let yara_engine = match DynamicYaraEngine::new(Some("rules")) {
+        // Initialize YARA engine with the resolved rules directory
+        let rules_dir = Self::resolve_rules_dir();
+        let yara_engine = match DynamicYaraEngine::new(rules_dir.as_deref()) {
             Ok(engine) => {
                 if engine.is_compiled() {
                     log::info!(
@@ -152,7 +153,7 @@ impl DetectionEngine {
             evasion_detector,
             mitre_engine,
             yara_engine,
-            _config: config,
+            config: config.unwrap_or_default(),
             #[cfg(all(target_os = "linux", feature = "ebpf-detection"))]
             ebpf_detector,
         })
@@ -168,15 +169,31 @@ impl DetectionEngine {
         let mut indicators = Vec::new();
         let mut confidence = 0.0;
 
-        // Check for RWX memory regions
+        // Check for RWX memory regions. Unbacked (MEM_PRIVATE) RWX is the
+        // meaningful case: image-backed RWX sections exist in some legitimate
+        // modules, while writable+executable private memory is where injected
+        // code lives. JIT runtimes also allocate it, so this is a moderate
+        // signal that needs corroboration - never a verdict on its own.
         let rwx_count = memory_regions
             .iter()
             .filter(|r| r.protection == MemoryProtection::ReadWriteExecute)
             .count();
+        let unbacked_rwx = memory_regions
+            .iter()
+            .filter(|r| {
+                r.protection == MemoryProtection::ReadWriteExecute && r.region_type == "PRIVATE"
+            })
+            .count();
 
-        if rwx_count > 0 {
-            indicators.push(format!("{} RWX memory regions detected", rwx_count));
-            confidence += 0.3;
+        if unbacked_rwx > 0 {
+            indicators.push(format!(
+                "{} unbacked RWX memory regions detected",
+                unbacked_rwx
+            ));
+            confidence += 0.35;
+        } else if rwx_count > 0 {
+            indicators.push(format!("{} image-backed RWX regions detected", rwx_count));
+            confidence += 0.1;
         }
 
         // Check for private executable memory
@@ -216,48 +233,92 @@ impl DetectionEngine {
         self.check_memory_patterns(memory_regions, &mut indicators, &mut confidence);
 
         // Analyze threads if provided
-        if let Some(thread_list) = threads {
-            self.analyze_threads(thread_list, &mut indicators, &mut confidence);
+        if self.config.thread_analysis_enabled {
+            if let Some(thread_list) = threads {
+                self.analyze_threads(
+                    thread_list,
+                    memory_regions,
+                    &mut indicators,
+                    &mut confidence,
+                );
+            }
         }
 
         // Check for Windows hook injection
-        if let Ok(hook_result) = detect_hook_injection(process.pid) {
-            if hook_result.suspicious_count > 0 {
-                indicators.push(format!(
-                    "{} suspicious Windows hooks detected",
-                    hook_result.suspicious_count
-                ));
-                confidence += 0.6; // High confidence for hook-based injection
-            }
+        if self.config.hook_detection {
+            if let Ok(hook_result) = detect_hook_injection(process.pid) {
+                if hook_result.suspicious_count > 0 {
+                    indicators.push(format!(
+                        "{} suspicious Windows hooks detected",
+                        hook_result.suspicious_count
+                    ));
+                    confidence += 0.6; // High confidence for hook-based injection
+                }
 
-            if hook_result.global_hooks > 8 {
-                indicators.push("Excessive global hooks (possible system compromise)".to_string());
-                confidence += 0.3;
+                if hook_result.global_hooks > 8 {
+                    indicators
+                        .push("Excessive global hooks (possible system compromise)".to_string());
+                    confidence += 0.3;
+                }
             }
         }
 
-        // Scan for shellcode patterns in executable memory regions
-        let shellcode_detections = self.scan_for_shellcode(process.pid, memory_regions);
+        // Scan for shellcode patterns in executable memory regions.
+        // Matches are collapsed per signature: a single JIT region can
+        // contain hundreds of hits for one pattern, and scoring each
+        // occurrence separately was the source of both the 100+ indicator
+        // lists and the runaway confidence.
+        let shellcode_detections = if self.config.shellcode_detection {
+            self.scan_for_shellcode(process.pid, memory_regions)
+        } else {
+            Vec::new()
+        };
         if !shellcode_detections.is_empty() {
+            let mut by_signature: std::collections::BTreeMap<String, (usize, usize, f32)> =
+                std::collections::BTreeMap::new();
             for detection in &shellcode_detections {
-                indicators.push(format!(
-                    "Shellcode detected at {:#x}: {}",
-                    detection.address,
-                    detection.signature_matches.join(", ")
-                ));
-                confidence += detection.confidence;
+                for sig in &detection.signature_matches {
+                    let entry = by_signature.entry(sig.clone()).or_insert((
+                        0,
+                        detection.address,
+                        detection.confidence,
+                    ));
+                    entry.0 += 1;
+                    entry.2 = entry.2.max(detection.confidence);
+                }
             }
+
+            // A real implant signature appears a handful of times. Thousands
+            // of hits means the pattern is describing ordinary code in this
+            // process (typically JIT output), not an implant.
+            const IMPLAUSIBLE_MATCH_COUNT: usize = 64;
+
+            let mut shellcode_score = 0.0f32;
+            for (sig, (count, first_addr, conf)) in &by_signature {
+                if *count < Self::min_occurrences_for(sig) || *count > IMPLAUSIBLE_MATCH_COUNT {
+                    continue;
+                }
+                indicators.push(format!(
+                    "Shellcode signature '{}' matched {}x (first at {:#x})",
+                    sig, count, first_addr
+                ));
+                shellcode_score += conf;
+            }
+            // Cap the whole category so pattern volume cannot dominate.
+            confidence += shellcode_score.min(0.5);
         }
 
         // Check for process hollowing
-        if let Ok(Some(hollowing_detection)) = self
-            .hollowing_detector
-            .analyze_process(process, memory_regions)
-        {
-            for indicator in &hollowing_detection.indicators {
-                indicators.push(format!("Process hollowing: {}", indicator));
+        if self.config.hollowing_detection {
+            if let Ok(Some(hollowing_detection)) = self
+                .hollowing_detector
+                .analyze_process(process, memory_regions)
+            {
+                for indicator in &hollowing_detection.indicators {
+                    indicators.push(format!("Process hollowing: {}", indicator));
+                }
+                confidence += hollowing_detection.confidence;
             }
-            confidence += hollowing_detection.confidence;
         }
 
         // YARA rule scanning
@@ -365,9 +426,33 @@ impl DetectionEngine {
             },
         );
 
-        let threat_level = if confidence >= 0.7 {
+        // Each indicator adds to the score, so a process with many of them
+        // accumulates well past 1.0 - clamp before it is reported as a
+        // percentage (unclamped scores rendered as e.g. "7679.2%").
+        let confidence = confidence.clamp(0.0, 1.0);
+
+        // Promotion gate: a verdict needs corroboration, not just volume.
+        // Scoring alone let a pile of weak heuristics reach "Malicious",
+        // which is how a clean desktop produced 187 malicious verdicts.
+        // At least one high-confidence indicator must be present before a
+        // process can be called malicious.
+        let strong_signals = indicators
+            .iter()
+            .filter(|i| Self::is_strong_indicator(i))
+            .count();
+
+        // `confidence_threshold` is the configured bar for calling something
+        // suspicious; a malicious verdict sits well above it and additionally
+        // requires corroboration.
+        // Never let the malicious bar fall below 0.7 - a lower suspicious
+        // threshold should surface more for triage, not hand out more
+        // malicious verdicts.
+        let suspicious_at = self.config.confidence_threshold.clamp(0.05, 0.95);
+        let malicious_at = (suspicious_at * 2.0).clamp(0.7, 0.95);
+
+        let threat_level = if confidence >= malicious_at && strong_signals >= 1 {
             ThreatLevel::Malicious
-        } else if confidence >= 0.3 {
+        } else if confidence >= suspicious_at || strong_signals >= 1 {
             ThreatLevel::Suspicious
         } else {
             ThreatLevel::Clean
@@ -507,67 +592,174 @@ impl DetectionEngine {
         indicators: &mut Vec<String>,
         confidence: &mut f32,
     ) {
-        // Look for small executable allocations (typical shellcode size)
-        let small_exec = regions
+        // Small executable allocations only mean something when the memory
+        // is unbacked (MEM_PRIVATE). Without that filter every mapped DLL
+        // contributed its own sub-64KB .text section, so any process with
+        // three loaded modules tripped this.
+        let small_unbacked_exec = regions
             .iter()
             .filter(|r| {
-                r.size < 0x10000 // 64KB
+                r.region_type == "PRIVATE"
+                    && r.size < 0x10000 // 64KB
                     && (r.protection == MemoryProtection::ReadExecute
                         || r.protection == MemoryProtection::ReadWriteExecute)
             })
             .count();
 
-        if small_exec >= 3 {
-            indicators.push("Multiple small executable allocations".to_string());
-            *confidence += 0.3;
+        // JIT runtimes (CLR, V8) legitimately produce a handful of small
+        // private executable allocations, so require a meaningful cluster.
+        if small_unbacked_exec >= 8 {
+            indicators.push(format!(
+                "{} small unbacked executable allocations",
+                small_unbacked_exec
+            ));
+            *confidence += 0.15;
         }
 
-        // Check for memory gaps that might indicate hollowing
-        let mut sorted_regions: Vec<_> = regions.iter().collect();
-        sorted_regions.sort_by_key(|r| r.base_address);
-
-        for window in sorted_regions.windows(2) {
-            let gap = window[1].base_address - (window[0].base_address + window[0].size);
-            if gap > 0x100000 && gap < 0x1000000 {
-                // 1MB to 16MB gap is suspicious
-                indicators.push("Suspicious memory gaps detected".to_string());
-                *confidence += 0.2;
-                break;
-            }
-        }
+        // NOTE: a "suspicious memory gaps" check used to live here, firing on
+        // any 1-16MB gap between committed regions. That is the size of a
+        // default thread stack reservation, so it matched essentially every
+        // process. Gaps in the address space carry no injection signal.
     }
 
-    /// Analyze thread patterns for injection indicators
+    /// Analyze thread patterns for injection indicators.
+    ///
+    /// The strongest user-mode injection signal available is a thread whose
+    /// entry point lies in executable memory that is not backed by a mapped
+    /// image (see Elastic's Get-InjectedThread research). Legitimate JIT
+    /// runtimes place *code* in private executable memory but do not
+    /// normally start *threads* there, which is what makes the start-address
+    /// form of this test safe where a raw region test would not be.
     fn analyze_threads(
         &self,
         threads: &[ThreadInfo],
+        regions: &[MemoryRegion],
         indicators: &mut Vec<String>,
         confidence: &mut f32,
     ) {
-        // Check for threads started from unusual locations
-        let suspicious_threads = threads
+        let unbacked_start_threads = threads
             .iter()
             .filter(|t| {
-                // Look for threads not started from main image
-                t.start_address != 0 && (t.start_address & 0xFFFF_0000) != 0x7FF0_0000
+                t.start_address != 0 && Self::is_unbacked_executable(regions, t.start_address)
             })
             .count();
 
-        if suspicious_threads > 0 {
+        if unbacked_start_threads > 0 {
             indicators.push(format!(
-                "{} threads with suspicious start addresses",
-                suspicious_threads
+                "{} thread(s) starting in unbacked executable memory",
+                unbacked_start_threads
             ));
-            *confidence += 0.4;
+            *confidence += 0.6;
         }
 
-        // Check for abnormal thread creation time patterns
-        let recent_threads = threads.iter().filter(|t| t.creation_time > 0).count();
+        // NOTE: two checks used to live here and both fired on every process.
+        // One tested `start_address & 0xFFFF_0000 != 0x7FF0_0000`, a 32-bit
+        // era constant that no 64-bit address satisfies. The other counted
+        // threads with `creation_time > 0` as "recently created", but that
+        // field is an absolute FILETIME, so it is non-zero for every live
+        // thread and the ratio was always 1.0.
+    }
 
-        if recent_threads as f32 / threads.len() as f32 > 0.5 {
-            indicators.push("High ratio of recently created threads".to_string());
-            *confidence += 0.3;
+    /// Locates the YARA rules directory.
+    ///
+    /// The path used to be the bare relative literal "rules", so the engine
+    /// silently disabled itself whenever ghost ran from any directory other
+    /// than the source tree - which is every installed deployment. Look
+    /// next to the executable first, then at an explicit override, then the
+    /// working directory.
+    fn resolve_rules_dir() -> Option<String> {
+        if let Ok(dir) = std::env::var("GHOST_RULES_DIR") {
+            if std::path::Path::new(&dir).is_dir() {
+                return Some(dir);
+            }
+            log::warn!("GHOST_RULES_DIR is set but not a directory: {}", dir);
         }
+
+        if let Ok(exe) = std::env::current_exe() {
+            for base in exe.parent().into_iter().chain(
+                exe.parent()
+                    .and_then(|p| p.parent())
+                    .and_then(|p| p.parent()),
+            ) {
+                let candidate = base.join("rules");
+                if candidate.is_dir() {
+                    return candidate.to_str().map(str::to_string);
+                }
+            }
+        }
+
+        if std::path::Path::new("rules").is_dir() {
+            return Some("rules".to_string());
+        }
+
+        log::warn!(
+            "No YARA rules directory found (set GHOST_RULES_DIR or place 'rules' \
+             next to the executable); signature scanning is disabled"
+        );
+        None
+    }
+
+    /// How many times a signature must appear in one process before it is
+    /// worth reporting.
+    ///
+    /// Some byte sequences are individually ordinary and only become
+    /// meaningful in bulk. A single `mov r10,rcx ; mov eax,imm32` is the
+    /// prologue of every ntdll stub and shows up in copied thunks and JIT
+    /// output; a *table* of them in private memory is a generated syscall
+    /// stub set, which is the thing worth flagging.
+    fn min_occurrences_for(signature: &str) -> usize {
+        match signature {
+            "Direct Syscall Setup (x64)" => 3,
+            "NOP Sled" => 2,
+            _ => 1,
+        }
+    }
+
+    /// Indicators that carry a low base rate on clean systems, and so are
+    /// allowed to promote a process to a malicious verdict. Everything else
+    /// is corroborating context only.
+    fn is_strong_indicator(indicator: &str) -> bool {
+        // These must match the indicator text produced above verbatim.
+        //
+        // Hook findings are deliberately NOT here. Inline hook detection was
+        // dead until recently (a dangling pointer made the lookup fail), so
+        // its output has not been through a false-positive pass yet, and
+        // browsers, overlays and anti-cheat all hook legitimately. It still
+        // contributes confidence and is reported, but it does not by itself
+        // promote a process to a malicious verdict.
+        const STRONG: &[&str] = &[
+            "thread(s) starting in unbacked executable memory",
+            "Main executable image appears unmapped",
+        ];
+
+        // Only high-specificity shellcode signatures may promote a verdict.
+        // Generic ones (syscall prologues, NOP runs, stack setup) describe
+        // shapes that ordinary code also has.
+        const STRONG_SIGNATURES: &[&str] = &[
+            "Metasploit",
+            "Shikata Ga Nai",
+            "ROR13",
+            "Egg Hunter",
+            "Cobalt",
+            "Reflective",
+        ];
+
+        if indicator.starts_with("Shellcode signature") {
+            return STRONG_SIGNATURES.iter().any(|s| indicator.contains(s));
+        }
+
+        STRONG.iter().any(|s| indicator.contains(s))
+    }
+
+    /// True when `address` falls inside a committed, executable region that
+    /// is not backed by a mapped image or file.
+    fn is_unbacked_executable(regions: &[MemoryRegion], address: usize) -> bool {
+        regions.iter().any(|r| {
+            address >= r.base_address
+                && address < r.base_address.saturating_add(r.size)
+                && r.region_type == "PRIVATE"
+                && r.protection.is_executable()
+        })
     }
 
     /// Scan memory regions for shellcode patterns

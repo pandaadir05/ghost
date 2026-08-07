@@ -8,7 +8,7 @@
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use ghost_core::{
-    memory, process, thread, DetectionEngine, IndicatorOfCompromise, ProcessInfo, ThreatContext,
+    memory, thread, DetectionEngine, IndicatorOfCompromise, ProcessInfo, ThreatContext,
     ThreatIntelligence, ThreatLevel,
 };
 use ratatui::widgets::{ListState, TableState};
@@ -27,6 +27,8 @@ pub enum TabIndex {
 }
 
 impl TabIndex {
+    pub const COUNT: usize = 6;
+
     pub fn from_index(index: usize) -> Self {
         match index {
             0 => TabIndex::Overview,
@@ -40,7 +42,11 @@ impl TabIndex {
     }
 
     pub fn next(self) -> Self {
-        Self::from_index((self as usize + 1) % 6)
+        Self::from_index((self as usize + 1) % Self::COUNT)
+    }
+
+    pub fn prev(self) -> Self {
+        Self::from_index((self as usize + Self::COUNT - 1) % Self::COUNT)
     }
 }
 
@@ -91,10 +97,23 @@ pub struct MemoryStats {
     pub total_committed_mb: f64,
 }
 
+/// Analysis result for a single process, produced without holding the
+/// shared app state. `None` detection means the process came back clean.
+#[derive(Debug)]
+pub struct ProcessScanData {
+    pub detection: Option<DetectionEvent>,
+    pub threat_level: ThreatLevel,
+    pub total_regions: usize,
+    pub rwx_regions: usize,
+    pub private_regions: usize,
+    pub suspicious_allocations: usize,
+    pub largest_region_bytes: u64,
+    pub committed_bytes: u64,
+}
+
 #[derive(Debug)]
 pub struct App {
     pub current_tab: TabIndex,
-    pub detection_engine: DetectionEngine,
     pub threat_intel: ThreatIntelligence,
     pub processes: Vec<ProcessInfo>,
     pub detections: VecDeque<DetectionEvent>,
@@ -103,6 +122,10 @@ pub struct App {
     pub memory_stats: MemoryStats,
     pub threat_intel_data: ThreatIntelData,
     pub last_scan: Option<Instant>,
+    /// `(scanned, total)` while a scan is in progress.
+    pub scan_progress: Option<(usize, usize)>,
+    /// Start of the in-flight scan, for the live elapsed timer.
+    pub scan_started: Option<Instant>,
 
     // UI state
     pub processes_state: TableState,
@@ -118,12 +141,11 @@ pub struct App {
 }
 
 impl App {
-    /// Creates a new application instance with initialized detection engine.
+    /// Creates a new application instance.
     ///
     /// # Errors
     ///
-    /// Returns an error if the detection engine or threat intelligence
-    /// system fails to initialize.
+    /// Returns an error if the threat intelligence system fails to initialize.
     pub async fn new() -> Result<Self> {
         let mut threat_intel = ThreatIntelligence::new();
         // Don't block on threat feed initialization - do it in background
@@ -136,12 +158,8 @@ impl App {
         // Re-create threat_intel since we moved it
         let threat_intel = ThreatIntelligence::new();
 
-        let detection_engine = DetectionEngine::new()
-            .map_err(|e| anyhow::anyhow!("Failed to initialize detection engine: {}", e))?;
-
         let mut app = Self {
             current_tab: TabIndex::Overview,
-            detection_engine,
             threat_intel,
             processes: Vec::new(),
             detections: VecDeque::new(),
@@ -162,6 +180,8 @@ impl App {
                 threat_feed_status: Vec::new(),
             },
             last_scan: None,
+            scan_progress: None,
+            scan_started: None,
             processes_state: TableState::default(),
             detections_state: ListState::default(),
             logs_state: ListState::default(),
@@ -172,7 +192,10 @@ impl App {
             max_detection_entries: 500,
         };
 
-        app.add_log_message("Ghost TUI v0.1.0 - Process Injection Detection".into());
+        app.add_log_message(format!(
+            "Ghost TUI v{} - Process Injection Detection",
+            env!("CARGO_PKG_VERSION")
+        ));
         app.add_log_message("Detection engine initialized successfully".into());
         app.add_log_message("Starting initial scan...".into());
 
@@ -183,123 +206,146 @@ impl App {
         Ok(app)
     }
 
-    /// Performs a full system scan for process injection indicators.
-    ///
-    /// This method enumerates all running processes, analyzes their memory
-    /// regions and threads, and records any suspicious or malicious findings.
-    pub async fn update_scan_data(&mut self) -> Result<()> {
-        let scan_start = Instant::now();
+    /// Starts a new scan pass: publishes the process list immediately and
+    /// resets the per-scan counters so results can stream in as each
+    /// process is analyzed. Cheap - safe to call under the shared lock.
+    pub fn begin_scan(&mut self, processes: Vec<ProcessInfo>) {
+        self.stats.total_processes = processes.len();
+        self.stats.suspicious_processes = 0;
+        self.stats.malicious_processes = 0;
+        self.stats.scan_time_ms = 0;
+        self.memory_stats = MemoryStats::default();
+        self.scan_progress = Some((0, processes.len()));
+        self.scan_started = Some(Instant::now());
+        self.add_log_message(format!("Scanning {} processes...", processes.len()));
+        self.processes = processes;
+    }
 
-        self.processes = match process::enumerate_processes() {
-            Ok(procs) => procs,
-            Err(e) => {
-                self.add_log_message(format!("Process enumeration failed: {}", e));
-                return Err(anyhow::anyhow!("Process enumeration failed: {}", e));
-            }
+    /// Elapsed time of the in-flight scan, or the last completed scan's
+    /// duration when idle. Drives the live timer in the UI.
+    pub fn scan_elapsed_ms(&self) -> u64 {
+        match self.scan_started {
+            Some(started) => started.elapsed().as_millis() as u64,
+            None => self.stats.scan_time_ms,
+        }
+    }
+
+    /// Analyzes a single process. This is the expensive part of a scan and
+    /// deliberately takes the detection engine instead of `&mut self` so it
+    /// runs without holding the shared app state - locking the app for a
+    /// whole scan pass blanks the UI and drops input. Feed the result to
+    /// [`App::record_scan_result`] under a brief lock.
+    ///
+    /// Returns `None` for processes that are skipped or inaccessible.
+    pub fn scan_process(
+        engine: &mut DetectionEngine,
+        proc: &ProcessInfo,
+    ) -> Option<ProcessScanData> {
+        if Self::should_skip_process(proc) {
+            return None;
+        }
+
+        let regions = memory::enumerate_memory_regions(proc.pid).ok()?;
+
+        let mut data = ProcessScanData {
+            detection: None,
+            threat_level: ThreatLevel::Clean,
+            total_regions: 0,
+            rwx_regions: 0,
+            private_regions: 0,
+            suspicious_allocations: 0,
+            largest_region_bytes: 0,
+            committed_bytes: 0,
         };
 
-        let mut detection_count = 0;
-        let mut suspicious_count = 0;
-        let mut malicious_count = 0;
-
-        // Memory stats tracking
-        let mut total_regions = 0usize;
-        let mut rwx_regions = 0usize;
-        let mut private_regions = 0usize;
-        let mut suspicious_allocations = 0usize;
-        let mut largest_region: u64 = 0;
-        let mut total_committed: u64 = 0;
-
-        let processes = self.processes.clone();
-        for proc in &processes {
-            if Self::should_skip_process(proc) {
-                continue;
+        // Collect memory statistics
+        for region in &regions {
+            data.total_regions += 1;
+            data.committed_bytes += region.size as u64;
+            if region.size as u64 > data.largest_region_bytes {
+                data.largest_region_bytes = region.size as u64;
             }
 
-            let regions = match memory::enumerate_memory_regions(proc.pid) {
-                Ok(r) => r,
-                Err(_) => continue,
-            };
-
-            // Collect memory statistics
-            for region in &regions {
-                total_regions += 1;
-                total_committed += region.size as u64;
-                if region.size as u64 > largest_region {
-                    largest_region = region.size as u64;
-                }
-
-                // Check for RWX (read-write-execute) - suspicious
-                if region.protection.is_readable()
-                    && region.protection.is_writable()
-                    && region.protection.is_executable()
-                {
-                    rwx_regions += 1;
-                    suspicious_allocations += 1;
-                }
-
-                // Private vs shared - check region type
-                if region.region_type.contains("PRIVATE") || region.region_type.contains("private")
-                {
-                    private_regions += 1;
-                }
+            // Check for RWX (read-write-execute) - suspicious
+            if region.protection.is_readable()
+                && region.protection.is_writable()
+                && region.protection.is_executable()
+            {
+                data.rwx_regions += 1;
+                data.suspicious_allocations += 1;
             }
 
-            let threads = thread::enumerate_threads(proc.pid).ok();
-            let result = self
-                .detection_engine
-                .analyze_process(proc, &regions, threads.as_deref());
-
-            match result.threat_level {
-                ThreatLevel::Suspicious => suspicious_count += 1,
-                ThreatLevel::Malicious => malicious_count += 1,
-                ThreatLevel::Clean => {}
-            }
-
-            if result.threat_level != ThreatLevel::Clean {
-                detection_count += 1;
-                self.add_detection(DetectionEvent {
-                    timestamp: Utc::now(),
-                    process: proc.clone(),
-                    threat_level: result.threat_level,
-                    indicators: result.indicators,
-                    confidence: result.confidence,
-                    threat_context: result.threat_context,
-                });
+            // Private vs shared - check region type
+            if region.region_type.contains("PRIVATE") || region.region_type.contains("private") {
+                data.private_regions += 1;
             }
         }
 
-        let scan_duration = scan_start.elapsed();
+        let threads = thread::enumerate_threads(proc.pid).ok();
+        let result = engine.analyze_process(proc, &regions, threads.as_deref());
 
-        self.stats = SystemStats {
-            total_processes: self.processes.len(),
-            suspicious_processes: suspicious_count,
-            malicious_processes: malicious_count,
-            total_detections: self.detections.len(),
-            scan_time_ms: scan_duration.as_millis() as u64,
-            memory_usage_mb: self.estimate_memory_usage(),
-        };
+        data.threat_level = result.threat_level;
+        if result.threat_level != ThreatLevel::Clean {
+            data.detection = Some(DetectionEvent {
+                timestamp: Utc::now(),
+                process: proc.clone(),
+                threat_level: result.threat_level,
+                indicators: result.indicators,
+                confidence: result.confidence,
+                threat_context: result.threat_context,
+            });
+        }
 
-        self.memory_stats = MemoryStats {
-            total_regions,
-            rwx_regions,
-            private_regions,
-            shared_regions: total_regions.saturating_sub(private_regions),
-            suspicious_allocations,
-            largest_region_mb: largest_region as f64 / 1024.0 / 1024.0,
-            total_committed_mb: total_committed as f64 / 1024.0 / 1024.0,
-        };
+        Some(data)
+    }
 
-        self.last_scan = Some(scan_start);
+    /// Folds one process's scan result into the live stats so the UI
+    /// updates as the scan progresses. Cheap - safe under the shared lock.
+    pub fn record_scan_result(&mut self, scanned: usize, data: Option<ProcessScanData>) {
+        if let Some((_, total)) = self.scan_progress {
+            self.scan_progress = Some((scanned, total));
+        }
 
+        let Some(data) = data else { return };
+
+        match data.threat_level {
+            ThreatLevel::Suspicious => self.stats.suspicious_processes += 1,
+            ThreatLevel::Malicious => self.stats.malicious_processes += 1,
+            ThreatLevel::Clean => {}
+        }
+
+        let mem = &mut self.memory_stats;
+        mem.total_regions += data.total_regions;
+        mem.rwx_regions += data.rwx_regions;
+        mem.private_regions += data.private_regions;
+        mem.shared_regions = mem.total_regions.saturating_sub(mem.private_regions);
+        mem.suspicious_allocations += data.suspicious_allocations;
+        let largest_mb = data.largest_region_bytes as f64 / 1024.0 / 1024.0;
+        if largest_mb > mem.largest_region_mb {
+            mem.largest_region_mb = largest_mb;
+        }
+        mem.total_committed_mb += data.committed_bytes as f64 / 1024.0 / 1024.0;
+
+        if let Some(detection) = data.detection {
+            self.add_detection(detection);
+            self.stats.total_detections = self.detections.len();
+        }
+    }
+
+    /// Finalizes a scan pass. Cheap - safe under the shared lock.
+    pub fn finish_scan(&mut self, scan_time_ms: u64) {
+        self.stats.scan_time_ms = scan_time_ms;
+        self.stats.total_detections = self.detections.len();
+        self.stats.memory_usage_mb = self.estimate_memory_usage();
+        self.scan_progress = None;
+        self.scan_started = None;
+        self.last_scan = Some(Instant::now());
         self.add_log_message(format!(
-            "Scan complete: {} processes, {} detections in {}ms",
+            "Scan complete: {} processes, {} total detections in {}ms",
             self.processes.len(),
-            detection_count,
-            scan_duration.as_millis()
+            self.detections.len(),
+            scan_time_ms
         ));
-
-        Ok(())
     }
 
     /// Determines if a process should be skipped during scanning.
@@ -308,12 +354,21 @@ impl App {
         SKIP_PROCESSES.iter().any(|&name| proc.name == name) || proc.pid == 0 || proc.pid == 4
     }
 
-    pub async fn force_refresh(&mut self) -> Result<()> {
-        self.add_log_message("Forcing refresh...".to_string());
-        self.update_scan_data().await
-    }
-
     pub fn add_detection(&mut self, detection: DetectionEvent) {
+        // Periodic rescans report the same findings every pass; skip exact
+        // repeats for a process so the history only records changes.
+        if let Some(existing) = self
+            .detections
+            .iter()
+            .find(|d| d.process.pid == detection.process.pid)
+        {
+            if existing.threat_level == detection.threat_level
+                && existing.indicators == detection.indicators
+            {
+                return;
+            }
+        }
+
         // Add to front of deque for most recent first
         self.detections.push_front(detection);
 
@@ -337,56 +392,78 @@ impl App {
 
     pub fn clear_detections(&mut self) {
         self.detections.clear();
+        self.detections_state.select(None);
         self.add_log_message("Detection history cleared".to_string());
+    }
+
+    pub fn clear_logs(&mut self) {
+        self.logs.clear();
+        self.logs_state.select(None);
+        self.add_log_message("Logs cleared".to_string());
+    }
+
+    /// Clears the data associated with the current tab.
+    pub fn clear_current(&mut self) {
+        match self.current_tab {
+            TabIndex::Logs => self.clear_logs(),
+            TabIndex::Overview | TabIndex::Detections => self.clear_detections(),
+            _ => {}
+        }
     }
 
     pub fn next_tab(&mut self) {
         self.current_tab = self.current_tab.next();
     }
 
+    pub fn prev_tab(&mut self) {
+        self.current_tab = self.current_tab.prev();
+    }
+
+    /// Returns the previous index, wrapping to the end. `None` when the list is empty.
+    fn wrap_prev(current: Option<usize>, len: usize) -> Option<usize> {
+        if len == 0 {
+            return None;
+        }
+        match current {
+            Some(i) if i > 0 => Some(i - 1),
+            _ => Some(len - 1),
+        }
+    }
+
+    /// Returns the next index, wrapping to the start. `None` when the list is empty.
+    fn wrap_next(current: Option<usize>, len: usize) -> Option<usize> {
+        if len == 0 {
+            return None;
+        }
+        match current {
+            Some(i) if i + 1 < len => Some(i + 1),
+            _ => Some(0),
+        }
+    }
+
     pub fn scroll_up(&mut self) {
         match self.current_tab {
             TabIndex::Processes => {
-                let i = match self.processes_state.selected() {
-                    Some(i) => {
-                        if i == 0 {
-                            self.processes.len() - 1
-                        } else {
-                            i - 1
-                        }
-                    }
-                    None => 0,
-                };
-                self.processes_state.select(Some(i));
-                if let Some(process) = self.processes.get(i) {
+                let i = Self::wrap_prev(self.processes_state.selected(), self.processes.len());
+                self.processes_state.select(i);
+                if let Some(process) = i.and_then(|i| self.processes.get(i)) {
                     self.selected_process = Some(process.clone());
                 }
             }
             TabIndex::Detections => {
-                let i = match self.detections_state.selected() {
-                    Some(i) => {
-                        if i == 0 {
-                            self.detections.len() - 1
-                        } else {
-                            i - 1
-                        }
-                    }
-                    None => 0,
-                };
-                self.detections_state.select(Some(i));
+                let i = Self::wrap_prev(self.detections_state.selected(), self.detections.len());
+                self.detections_state.select(i);
             }
             TabIndex::Logs => {
-                let i = match self.logs_state.selected() {
-                    Some(i) => {
-                        if i == 0 {
-                            self.logs.len() - 1
-                        } else {
-                            i - 1
-                        }
-                    }
-                    None => 0,
-                };
-                self.logs_state.select(Some(i));
+                let i = Self::wrap_prev(self.logs_state.selected(), self.logs.len());
+                self.logs_state.select(i);
+            }
+            TabIndex::ThreatIntel => {
+                let i = Self::wrap_prev(
+                    self.threat_intel_state.selected(),
+                    self.threat_intel_data.recent_iocs.len(),
+                );
+                self.threat_intel_state.select(i);
             }
             _ => {}
         }
@@ -395,46 +472,26 @@ impl App {
     pub fn scroll_down(&mut self) {
         match self.current_tab {
             TabIndex::Processes => {
-                let i = match self.processes_state.selected() {
-                    Some(i) => {
-                        if i >= self.processes.len() - 1 {
-                            0
-                        } else {
-                            i + 1
-                        }
-                    }
-                    None => 0,
-                };
-                self.processes_state.select(Some(i));
-                if let Some(process) = self.processes.get(i) {
+                let i = Self::wrap_next(self.processes_state.selected(), self.processes.len());
+                self.processes_state.select(i);
+                if let Some(process) = i.and_then(|i| self.processes.get(i)) {
                     self.selected_process = Some(process.clone());
                 }
             }
             TabIndex::Detections => {
-                let i = match self.detections_state.selected() {
-                    Some(i) => {
-                        if i >= self.detections.len() - 1 {
-                            0
-                        } else {
-                            i + 1
-                        }
-                    }
-                    None => 0,
-                };
-                self.detections_state.select(Some(i));
+                let i = Self::wrap_next(self.detections_state.selected(), self.detections.len());
+                self.detections_state.select(i);
             }
             TabIndex::Logs => {
-                let i = match self.logs_state.selected() {
-                    Some(i) => {
-                        if i >= self.logs.len() - 1 {
-                            0
-                        } else {
-                            i + 1
-                        }
-                    }
-                    None => 0,
-                };
-                self.logs_state.select(Some(i));
+                let i = Self::wrap_next(self.logs_state.selected(), self.logs.len());
+                self.logs_state.select(i);
+            }
+            TabIndex::ThreatIntel => {
+                let i = Self::wrap_next(
+                    self.threat_intel_state.selected(),
+                    self.threat_intel_data.recent_iocs.len(),
+                );
+                self.threat_intel_state.select(i);
             }
             _ => {}
         }

@@ -38,37 +38,201 @@ mod tests {
         assert!(result.indicators[0].contains("RWX"));
     }
 
+    /// `DetectionConfig` used to be stored in a field named `_config` and
+    /// never read, so every toggle a user set was silently ignored.
     #[test]
-    fn test_multiple_small_executable_regions() {
+    fn test_detector_toggles_are_honored() {
+        let process = create_test_process();
+        let regions = small_private_exec_regions(12);
+
+        let disabled = DetectionConfig {
+            shellcode_detection: false,
+            hollowing_detection: false,
+            hook_detection: false,
+            thread_analysis_enabled: false,
+            ..Default::default()
+        };
+        let mut engine =
+            DetectionEngine::with_config(Some(disabled)).expect("Failed to create engine");
+        let result = engine.analyze_process(&process, &regions, None);
+
+        assert!(
+            !result
+                .indicators
+                .iter()
+                .any(|i| i.contains("Process hollowing") || i.contains("Shellcode signature")),
+            "disabled detectors must not contribute indicators, got: {:?}",
+            result.indicators
+        );
+    }
+
+    /// A stricter confidence threshold must not make verdicts harsher.
+    #[test]
+    fn test_lower_threshold_does_not_create_malicious_verdicts() {
+        let process = create_test_process();
+        let mut regions = vec![MemoryRegion {
+            base_address: 0x7FF6_0000_0000,
+            size: 0x10_0000,
+            protection: MemoryProtection::ReadExecute,
+            region_type: "IMAGE".to_string(),
+        }];
+        regions.extend(small_private_exec_regions(12));
+
+        let sensitive = DetectionConfig {
+            confidence_threshold: 0.05,
+            ..Default::default()
+        };
+        let mut engine =
+            DetectionEngine::with_config(Some(sensitive)).expect("Failed to create engine");
+        let result = engine.analyze_process(&process, &regions, None);
+
+        assert_ne!(
+            result.threat_level,
+            ThreatLevel::Malicious,
+            "a lower threshold should surface more for triage, not promote to Malicious"
+        );
+    }
+
+    /// Regression guard for the false-positive flood.
+    ///
+    /// A clean-system scan once returned 187 of ~330 processes as Malicious
+    /// at 100% confidence because weak heuristics accumulated past the
+    /// threshold with nothing corroborating them. Memory-shape signals alone
+    /// must never reach a Malicious verdict.
+    #[test]
+    fn test_weak_signals_alone_never_reach_malicious() {
         let mut engine = DetectionEngine::new().expect("Failed to create engine");
         let process = create_test_process();
-        let regions = vec![
-            MemoryRegion {
-                base_address: 0x10000000,
-                size: 0x800, // Small size
-                protection: MemoryProtection::ReadExecute,
-                region_type: "PRIVATE".to_string(),
-            },
-            MemoryRegion {
-                base_address: 0x20000000,
-                size: 0x600, // Small size
-                protection: MemoryProtection::ReadExecute,
-                region_type: "PRIVATE".to_string(),
-            },
-            MemoryRegion {
-                base_address: 0x30000000,
-                size: 0x400, // Small size
-                protection: MemoryProtection::ReadExecute,
-                region_type: "PRIVATE".to_string(),
-            },
-        ];
+
+        // A normally mapped main image, as every real process has.
+        let mut regions = vec![MemoryRegion {
+            base_address: 0x7FF6_0000_0000,
+            size: 0x10_0000,
+            protection: MemoryProtection::ReadExecute,
+            region_type: "IMAGE".to_string(),
+        }];
+
+        // Pile on every weak memory signal at once: many RWX regions plus a
+        // large cluster of small private executable allocations - the shape
+        // a JIT-heavy process (browser, .NET host) legitimately produces.
+        regions.extend((0..12).map(|i| MemoryRegion {
+            base_address: 0x5000_0000 + i * 0x10_0000,
+            size: 0x2000,
+            protection: MemoryProtection::ReadWriteExecute,
+            region_type: "PRIVATE".to_string(),
+        }));
+        regions.extend(small_private_exec_regions(12));
 
         let result = engine.analyze_process(&process, &regions, None);
+
+        assert_ne!(
+            result.threat_level,
+            ThreatLevel::Malicious,
+            "weak signals alone must not produce a Malicious verdict, got {:?} at {} with {:?}",
+            result.threat_level,
+            result.confidence,
+            result.indicators
+        );
+    }
+
+    /// Confidence is a probability and must stay in range; it was once
+    /// reported to users as values like "7679.2%".
+    #[test]
+    fn test_confidence_never_exceeds_one() {
+        let mut engine = DetectionEngine::new().expect("Failed to create engine");
+        let process = create_test_process();
+        let mut regions = small_private_exec_regions(40);
+        regions.extend((0..40).map(|i| MemoryRegion {
+            base_address: 0x9000_0000 + i * 0x10_0000,
+            size: 0x1000,
+            protection: MemoryProtection::ReadWriteExecute,
+            region_type: "PRIVATE".to_string(),
+        }));
+
+        let result = engine.analyze_process(&process, &regions, None);
+
+        assert!(
+            (0.0..=1.0).contains(&result.confidence),
+            "confidence out of range: {}",
+            result.confidence
+        );
+    }
+
+    /// Builds `count` small private executable regions at distinct addresses.
+    fn small_private_exec_regions(count: usize) -> Vec<MemoryRegion> {
+        (0..count)
+            .map(|i| MemoryRegion {
+                base_address: 0x1000_0000 + i * 0x1000_0000,
+                size: 0x800, // well under the 64KB "small" cutoff
+                protection: MemoryProtection::ReadExecute,
+                region_type: "PRIVATE".to_string(),
+            })
+            .collect()
+    }
+
+    /// A handful of small private executable allocations is what a JIT
+    /// runtime produces during normal operation, so it must not raise the
+    /// indicator on its own.
+    #[test]
+    fn test_few_small_executable_regions_not_flagged() {
+        let mut engine = DetectionEngine::new().expect("Failed to create engine");
+        let process = create_test_process();
+
+        let result = engine.analyze_process(&process, &small_private_exec_regions(3), None);
+
+        assert!(
+            !result
+                .indicators
+                .iter()
+                .any(|i| i.contains("small unbacked executable")),
+            "3 small private regions is JIT-normal and must not be flagged, got: {:?}",
+            result.indicators
+        );
+    }
+
+    /// A larger cluster is not explained by ordinary JIT behaviour.
+    #[test]
+    fn test_many_small_executable_regions_flagged() {
+        let mut engine = DetectionEngine::new().expect("Failed to create engine");
+        let process = create_test_process();
+
+        let result = engine.analyze_process(&process, &small_private_exec_regions(10), None);
+
         assert!(result.confidence > 0.0);
-        assert!(result
-            .indicators
-            .iter()
-            .any(|i| i.contains("small executable")));
+        assert!(
+            result
+                .indicators
+                .iter()
+                .any(|i| i.contains("small unbacked executable")),
+            "10 small private regions should be flagged, got: {:?}",
+            result.indicators
+        );
+    }
+
+    /// Image-backed regions are ordinary loaded modules: every DLL has a
+    /// sub-64KB .text section, so counting them was the original defect.
+    #[test]
+    fn test_small_image_backed_regions_not_flagged() {
+        let mut engine = DetectionEngine::new().expect("Failed to create engine");
+        let process = create_test_process();
+        let regions: Vec<MemoryRegion> = small_private_exec_regions(20)
+            .into_iter()
+            .map(|mut r| {
+                r.region_type = "IMAGE".to_string();
+                r
+            })
+            .collect();
+
+        let result = engine.analyze_process(&process, &regions, None);
+
+        assert!(
+            !result
+                .indicators
+                .iter()
+                .any(|i| i.contains("small unbacked executable")),
+            "image-backed regions are loaded modules, got: {:?}",
+            result.indicators
+        );
     }
 
     #[test]
@@ -97,8 +261,13 @@ mod tests {
         ];
 
         let result = engine.analyze_process(&process, &regions, None);
-        // Multiple RWX regions should be highly suspicious
-        assert_eq!(result.threat_level, ThreatLevel::Malicious);
+        // Multiple unbacked RWX regions are worth surfacing, but they are
+        // also what a JIT runtime (browser, .NET host) produces during
+        // normal operation. This used to assert Malicious, which is how a
+        // clean desktop ended up with 187 malicious verdicts. Memory shape
+        // alone tops out at Suspicious; promotion needs a corroborating
+        // signal such as a thread starting in unbacked memory.
+        assert_eq!(result.threat_level, ThreatLevel::Suspicious);
         assert!(result.confidence >= 0.5);
     }
 

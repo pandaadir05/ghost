@@ -153,58 +153,104 @@ impl DynamicYaraEngine {
             });
         }
 
-        let mut compiler = Compiler::new().map_err(|e| GhostError::Configuration {
-            message: format!("YARA compiler error: {}", e),
-        })?;
-
-        let mut rule_count = 0;
         self.rule_metadata.clear();
-
-        // Recursively find and compile all .yar and .yara files
         let rule_files = Self::find_rule_files(rules_dir)?;
 
+        // Load every rule file that compiles on its own. A malformed file used
+        // to abort the entire compile (add_rules_str consumes the compiler on
+        // failure), which silently disabled all signature scanning because of
+        // one bad rule. Validating each file against a throwaway compiler lets
+        // the rest of the set stay live.
+        let mut candidates: Vec<(std::path::PathBuf, String)> = Vec::new();
         for rule_file in &rule_files {
-            match fs::read_to_string(rule_file) {
-                Ok(content) => {
-                    let namespace = rule_file
-                        .file_stem()
-                        .and_then(|s| s.to_str())
-                        .unwrap_or("default");
-
-                    match compiler.add_rules_str(&content) {
-                        Ok(c) => {
-                            compiler = c;
-                            log::info!("Compiled YARA rule: {}", rule_file.display());
-
-                            self.rule_metadata.push(YaraRuleMetadata {
-                                name: namespace.to_string(),
-                                file_path: rule_file.display().to_string(),
-                                threat_level: ThreatLevel::Medium,
-                                last_updated: SystemTime::now(),
-                            });
-
-                            rule_count += 1;
-                        }
-                        Err(e) => {
-                            log::error!("Failed to compile {}: {}", rule_file.display(), e);
-                            // Don't continue - compiler was consumed, return with error
-                            return Err(GhostError::Configuration {
-                                message: format!(
-                                    "Failed to compile {}: {}",
-                                    rule_file.display(),
-                                    e
-                                ),
-                            });
-                        }
-                    }
-                }
+            let content = match fs::read_to_string(rule_file) {
+                Ok(content) => content,
                 Err(e) => {
                     log::error!("Failed to read {}: {}", rule_file.display(), e);
+                    continue;
                 }
+            };
+
+            let probe = match Compiler::new() {
+                Ok(probe) => probe,
+                Err(e) => {
+                    return Err(GhostError::Configuration {
+                        message: format!("YARA compiler error: {}", e),
+                    })
+                }
+            };
+            match probe.add_rules_str(&content) {
+                Ok(_) => candidates.push((rule_file.clone(), content)),
+                Err(e) => log::error!(
+                    "Skipping YARA rule file {} (does not compile): {}",
+                    rule_file.display(),
+                    e
+                ),
             }
         }
 
-        if rule_count == 0 {
+        // Rules share a single namespace, so two files can still collide on a
+        // rule name even when each is valid alone. Accept files greedily and
+        // drop any that conflict with what is already loaded.
+        let mut accepted: Vec<(std::path::PathBuf, String)> = Vec::new();
+        for (path, content) in candidates {
+            let mut probe = match Compiler::new() {
+                Ok(probe) => probe,
+                Err(e) => {
+                    return Err(GhostError::Configuration {
+                        message: format!("YARA compiler error: {}", e),
+                    })
+                }
+            };
+
+            let mut conflicts = false;
+            for text in accepted
+                .iter()
+                .map(|(_, c)| c)
+                .chain(std::iter::once(&content))
+            {
+                match probe.add_rules_str(text) {
+                    Ok(next) => probe = next,
+                    Err(_) => {
+                        conflicts = true;
+                        break;
+                    }
+                }
+            }
+
+            if conflicts {
+                log::error!(
+                    "Skipping YARA rule file {}: rule name conflicts with an already loaded file",
+                    path.display()
+                );
+            } else {
+                accepted.push((path, content));
+            }
+        }
+
+        let mut compiler = Compiler::new().map_err(|e| GhostError::Configuration {
+            message: format!("YARA compiler error: {}", e),
+        })?;
+        for (path, content) in &accepted {
+            compiler = compiler
+                .add_rules_str(content)
+                .map_err(|e| GhostError::Configuration {
+                    message: format!("Failed to compile {}: {}", path.display(), e),
+                })?;
+
+            self.rule_metadata.push(YaraRuleMetadata {
+                name: path
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("default")
+                    .to_string(),
+                file_path: path.display().to_string(),
+                threat_level: ThreatLevel::Medium,
+                last_updated: SystemTime::now(),
+            });
+        }
+
+        if accepted.is_empty() {
             return Err(GhostError::Configuration {
                 message: "No YARA rules were successfully compiled".to_string(),
             });
@@ -217,9 +263,26 @@ impl DynamicYaraEngine {
                 message: format!("Rule compilation failed: {}", e),
             })?;
 
+        // Count actual rule declarations, not files: reporting the file count
+        // made the startup log claim "5 rules" for a set of several dozen.
+        let rule_count: usize = accepted
+            .iter()
+            .map(|(_, content)| {
+                content
+                    .lines()
+                    .map(str::trim_start)
+                    .filter(|line| line.starts_with("rule ") || line.starts_with("private rule "))
+                    .count()
+            })
+            .sum();
+
         self.compiled_rules = Some(compiled_rules);
 
-        log::info!("Successfully compiled {} YARA rules", rule_count);
+        log::info!(
+            "Compiled {} YARA rules from {} file(s)",
+            rule_count,
+            accepted.len()
+        );
         Ok(rule_count)
     }
 

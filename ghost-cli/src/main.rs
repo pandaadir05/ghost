@@ -453,6 +453,10 @@ fn main() -> Result<()> {
     let mitre_stats = matches.get_flag("mitre-stats");
 
     let format = matches.get_one::<String>("format").unwrap();
+    // Machine-readable formats must emit only their payload on stdout, or
+    // the result cannot be piped into jq/a SIEM.
+    let machine_output = matches!(format.as_str(), "json" | "csv");
+    let quiet = quiet || machine_output;
     let interval = *matches.get_one::<u64>("interval").unwrap();
     let target_pid = matches
         .get_one::<String>("pid")

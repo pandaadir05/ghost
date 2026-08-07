@@ -7,24 +7,21 @@ rule Generic_Shellcode_Patterns
         mitre_attack = "T1055"
 
     strings:
-        // Common shellcode prologue patterns
+        // Shellcode prologue: short jmp / push / xor / fs-relative load.
+        // The two generic compiler prologues that used to sit here
+        // ({ 55 89 E5 83 EC } and { 48 89 5C 24 ?? 48 89 74 24 }) were
+        // removed - they are what MSVC and GCC emit for every function.
         $prologue_1 = { EB ?? 5? 31 ?? 64 8B }
-        $prologue_2 = { 55 89 E5 83 EC }
-        $prologue_3 = { 48 89 5C 24 ?? 48 89 74 24 }
 
         // PEB/TEB access patterns (x86)
         $peb_access_1 = { 64 A1 30 00 00 00 }
         $peb_access_2 = { 64 8B 15 30 00 00 00 }
         $peb_access_3 = { 64 8B 0D 30 00 00 00 }
 
-        // PEB/TEB access patterns (x64)
-        $peb_access_x64_1 = { 65 48 8B 04 25 60 00 00 00 }
-        $peb_access_x64_2 = { 65 48 8B 0C 25 60 00 00 00 }
-
-        // API hashing (ROR13)
+        // API hashing (ROR13) - high specificity, low base rate
         $api_hash_ror13 = { C1 C? 0D 03 ?? 83 C? 04 }
 
-        // GetProcAddress pattern
+        // Export-directory walk used by manual GetProcAddress resolvers
         $getprocaddr = { 8B 40 78 03 C? 8B 58 20 03 D? }
 
         // LoadLibrary pattern
@@ -34,24 +31,18 @@ rule Generic_Shellcode_Patterns
         2 of them
 }
 
-rule Windows_API_Call_Shellcode
-{
-    meta:
-        description = "Detects shellcode with Windows API call patterns"
-        author = "Ghost Detection Engine"
-        threat_level = "medium"
-        mitre_attack = "T1106"
-
-    strings:
-        $api_1 = "kernel32" nocase
-        $api_2 = "ntdll" nocase
-        $api_3 = "advapi32" nocase
-        $api_call = { FF 5? ?? 85 C0 }
-        $stack_align = { 83 E4 F0 }
-
-    condition:
-        1 of ($api_*) and 1 of ($api_call, $stack_align)
-}
+// REMOVED: Windows_API_Call_Shellcode.
+// The condition was "1 of ($api_*) and 1 of ($api_call, $stack_align)", but
+// the $api_* glob also captured $api_call itself, so a single occurrence of
+// { FF 5? ?? 85 C0 } ("call [reg+disp8]; test eax,eax" - ubiquitous in
+// compiled code) satisfied both halves. The module-name requirement the
+// rule was built around was never actually enforced.
+//
+// NOTE: the x64 PEB access patterns { 65 48 8B 04 25 60 00 00 00 } were also
+// removed from Generic_Shellcode_Patterns above. "mov rax, gs:[0x60]" is
+// emitted throughout ntdll, kernelbase and the CRT, and since rules are
+// scanned against every executable region - including the .text of every
+// loaded system DLL - it matched in every process.
 
 rule Egg_Hunter_Shellcode
 {
@@ -78,61 +69,35 @@ rule Egg_Hunter_Shellcode
 rule Position_Independent_Shellcode
 {
     meta:
-        description = "Detects position-independent shellcode characteristics"
+        description = "Detects position-independent shellcode getPC constructs"
         author = "Ghost Detection Engine"
+        date = "2026-08-05"
         threat_level = "medium"
         mitre_attack = "T1027"
+        scan_context = "memory_region"
 
     strings:
-        // Call/Pop pattern to get EIP
-        $call_pop_1 = { E8 00 00 00 00 5? }
-        $call_pop_2 = { E8 ?? ?? ?? ?? 5? }
+        // call $+5 ; pop reg - the classic getPC sequence
+        $call_pop = { E8 00 00 00 00 5? }
 
-        // FSTENV trick
+        // FSTENV getPC trick
         $fstenv = { D9 EE D9 74 24 F4 5? }
 
-        // GetPC thunk
-        $getpc_thunk = { 8B 0C 24 C3 }
-
     condition:
         any of them
 }
 
-rule Stack_Pivot_Shellcode
-{
-    meta:
-        description = "Detects stack pivot operations common in shellcode"
-        author = "Ghost Detection Engine"
-        threat_level = "high"
-        mitre_attack = "T1055"
-
-    strings:
-        $pivot_1 = { 8B EC 81 EC ?? ?? 00 00 }
-        $pivot_2 = { 48 81 EC ?? ?? 00 00 }
-        $pivot_3 = { 54 5C }
-        $pivot_4 = { 94 }
-
-    condition:
-        any of them
-}
-
-rule NOP_Sled_Detection
-{
-    meta:
-        description = "Detects NOP sleds commonly used in exploits"
-        author = "Ghost Detection Engine"
-        threat_level = "low"
-        mitre_attack = "T1055"
-
-    strings:
-        $nop_x86 = { 90 90 90 90 90 90 90 90 90 90 }
-        $nop_x64 = { 66 90 66 90 66 90 66 90 66 90 }
-        $multi_nop_1 = { 40 40 40 40 40 40 40 40 }
-        $multi_nop_2 = { 47 47 47 47 47 47 47 47 }
-
-    condition:
-        any of them
-}
+// REMOVED: Stack_Pivot_Shellcode.
+// Its strings were { 8B EC 81 EC ?? ?? 00 00 } and { 48 81 EC ?? ?? 00 00 }
+// (the standard x86/x64 stack-frame prologues), { 54 5C } and { 94 } - the
+// last a SINGLE byte, which occurs roughly once every 256 bytes of any
+// buffer. With "any of them" and threat_level "high" this reported high
+// severity on every region of every process.
+//
+// REMOVED: NOP_Sled_Detection.
+// { 40 40 ... } and { 47 47 ... } are the ASCII strings "@@@@@@@@" and
+// "GGGGGGGG", which occur in base64 blobs, GUID tables and padding; long
+// 0x90 runs are ordinary alignment padding. No signal.
 
 rule Polymorphic_Decoder_Stub
 {

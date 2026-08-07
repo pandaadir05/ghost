@@ -26,12 +26,44 @@ impl ShellcodeDetector {
             signatures: Vec::new(),
         };
         detector.initialize_signatures();
+        detector.drop_unspecific_signatures();
         detector
+    }
+
+    /// Removes signatures that do not constrain enough bytes to identify
+    /// anything. See [`Self::MIN_SIGNIFICANT_BYTES`].
+    fn drop_unspecific_signatures(&mut self) {
+        self.signatures.retain(|sig| {
+            let significant = sig
+                .mask
+                .iter()
+                .take(sig.pattern.len())
+                .filter(|&&m| m != 0x00)
+                .count();
+            if significant < Self::MIN_SIGNIFICANT_BYTES {
+                log::debug!(
+                    "dropping unspecific shellcode signature '{}' ({} significant bytes)",
+                    sig.name,
+                    significant
+                );
+                return false;
+            }
+            true
+        });
     }
 
     pub fn signature_count(&self) -> usize {
         self.signatures.len()
     }
+
+    /// A signature must constrain at least this many bytes to be usable.
+    ///
+    /// Wildcarded bytes contribute nothing to specificity, so a "signature"
+    /// like `0F 05` (syscall) or `FF D0` (call eax) is really just an
+    /// instruction: it occurs throughout ordinary compiled code and in every
+    /// JIT-generated region. Signatures below this bar are dropped at load
+    /// time rather than being allowed to generate thousands of matches.
+    const MIN_SIGNIFICANT_BYTES: usize = 4;
 
     fn initialize_signatures(&mut self) {
         // ===== PEB/TEB Access Patterns (Windows) =====
@@ -115,7 +147,9 @@ impl ShellcodeDetector {
         // Metasploit x86 staged reverse TCP
         self.signatures.push(ShellcodeSignature {
             pattern: vec![0xFC, 0xE8, 0x82, 0x00, 0x00, 0x00], // CLD; call $+0x82
-            mask: vec![0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00],
+            // The displacement is what identifies this stub. Wildcarding it
+            // left "cld; call anything", which matches ordinary code.
+            mask: vec![0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF],
             name: "Metasploit x86 Reverse TCP",
             confidence: 0.95,
         });
@@ -128,41 +162,38 @@ impl ShellcodeDetector {
             confidence: 0.98,
         });
 
-        // Common x64 shellcode prologue
-        self.signatures.push(ShellcodeSignature {
-            pattern: vec![0x48, 0x83, 0xEC, 0x28, 0x48, 0x83, 0xE4, 0xF0], // sub rsp, 0x28; and rsp, -16
-            mask: vec![0xFF, 0xFF, 0xFF, 0x00, 0xFF, 0xFF, 0xFF, 0xFF],
-            name: "x64 Stack Setup Pattern",
-            confidence: 0.7,
-        });
+        // REMOVED: "x64 Stack Setup Pattern" ({ 48 83 EC 28 48 83 E4 F0 }).
+        // "sub rsp,0x28 ; and rsp,-16" is the stack setup MSVC emits for
+        // ordinary functions, so it matched throughout every JIT-generated
+        // region at confidence 0.7.
 
         // ===== Position-Independent Code Patterns =====
 
         // Call-pop technique (get current EIP/RIP)
         self.signatures.push(ShellcodeSignature {
             pattern: vec![0xE8, 0x00, 0x00, 0x00, 0x00, 0x58], // call $+5; pop eax
-            mask: vec![0xFF, 0x00, 0x00, 0x00, 0x00, 0xFF],
+            mask: vec![0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF],
             name: "Call-Pop GetPC (eax)",
             confidence: 0.9,
         });
 
         self.signatures.push(ShellcodeSignature {
             pattern: vec![0xE8, 0x00, 0x00, 0x00, 0x00, 0x5B], // call $+5; pop ebx
-            mask: vec![0xFF, 0x00, 0x00, 0x00, 0x00, 0xFF],
+            mask: vec![0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF],
             name: "Call-Pop GetPC (ebx)",
             confidence: 0.9,
         });
 
         self.signatures.push(ShellcodeSignature {
             pattern: vec![0xE8, 0x00, 0x00, 0x00, 0x00, 0x5D], // call $+5; pop ebp
-            mask: vec![0xFF, 0x00, 0x00, 0x00, 0x00, 0xFF],
+            mask: vec![0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF],
             name: "Call-Pop GetPC (ebp)",
             confidence: 0.9,
         });
 
         self.signatures.push(ShellcodeSignature {
             pattern: vec![0xE8, 0x00, 0x00, 0x00, 0x00, 0x5E], // call $+5; pop esi
-            mask: vec![0xFF, 0x00, 0x00, 0x00, 0x00, 0xFF],
+            mask: vec![0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF],
             name: "Call-Pop GetPC (esi)",
             confidence: 0.9,
         });
@@ -263,13 +294,10 @@ impl ShellcodeDetector {
             confidence: 0.6,
         });
 
-        // PUSH/RET technique (for control flow hijacking)
-        self.signatures.push(ShellcodeSignature {
-            pattern: vec![0x68], // push imm32
-            mask: vec![0xFF],
-            name: "PUSH/RET Control Flow",
-            confidence: 0.3, // Low confidence as standalone
-        });
+        // REMOVED: "PUSH/RET Control Flow".
+        // Its pattern was the single byte 0x68 ("push imm32"), which occurs
+        // constantly in any compiled code - it cannot function as a
+        // standalone signature at any confidence.
 
         // ===== Process Hollowing/Injection Indicators =====
 
